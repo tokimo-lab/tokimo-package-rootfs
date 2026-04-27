@@ -61,8 +61,8 @@ npm config set --global prefix /home/tokimo
 npm install -g pnpm docx pptxgenjs
 
 curl -fsSL https://go.dev/dl/go1.24.4.linux-amd64.tar.gz | tar -C /usr/local -xz
-ln -sf /usr/local/go/bin/go /usr/local/bin/go
-ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+ln -sf ../go/bin/go /usr/local/bin/go
+ln -sf ../go/bin/gofmt /usr/local/bin/gofmt
 
 cat > /etc/pip.conf << 'PIPEOF'
 [global]
@@ -70,8 +70,8 @@ index-url = https://pypi.tuna.tsinghua.edu.cn/simple
 trusted-host = pypi.tuna.tsinghua.edu.cn
 PIPEOF
 
-ln -sf /usr/bin/python3 /usr/local/bin/python
-ln -sf /usr/bin/lua5.4 /usr/local/bin/lua
+ln -sf ../../usr/bin/python3 /usr/local/bin/python
+ln -sf ../../usr/bin/lua5.4 /usr/local/bin/lua
 
 mkdir -p /home/tokimo/python_packages
 pip3 install --break-system-packages --target=/home/tokimo/python_packages \
