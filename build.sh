@@ -304,12 +304,17 @@ tar -xpf "$ROOTFS_TAR" \
   --exclude='./sys/*'
 
 echo "--- 最终验证 ---"
-"$ROOTFS_DIR/usr/bin/node" --version
-"$ROOTFS_DIR/usr/bin/python3" --version
-"$ROOTFS_DIR/usr/local/bin/python" --version
-"$ROOTFS_DIR/usr/local/bin/lua" -v
-"$ROOTFS_DIR/usr/local/bin/go" version
-"$ROOTFS_DIR/usr/bin/rustc" --version
+# 用 rootfs 自己的 ld-linux 跑验证，避免宿主机缺库 / QEMU 找不到 ld
+LD_LINUX="$ROOTFS_DIR/lib64/ld-linux-x86-64.so.2"
+[ "$ARCH" = "arm64" ] && LD_LINUX="$ROOTFS_DIR/lib/ld-linux-aarch64.so.1"
+LD_LIB="$ROOTFS_DIR/usr/lib/${DEB_MULTIARCH}:$ROOTFS_DIR/lib/${DEB_MULTIARCH}:$ROOTFS_DIR/usr/lib/libreoffice/program"
+
+"$LD_LINUX" --library-path "$LD_LIB" "$ROOTFS_DIR/usr/bin/node" --version
+"$LD_LINUX" --library-path "$LD_LIB" "$ROOTFS_DIR/usr/bin/python3" --version
+"$LD_LINUX" --library-path "$LD_LIB" "$ROOTFS_DIR/usr/local/bin/python" --version
+"$LD_LINUX" --library-path "$LD_LIB" "$ROOTFS_DIR/usr/local/bin/lua" -v
+"$LD_LINUX" --library-path "$LD_LIB" "$ROOTFS_DIR/usr/local/bin/go" version
+"$LD_LINUX" --library-path "$LD_LIB" "$ROOTFS_DIR/usr/bin/rustc" --version
 echo "Node bins:"
 ls "$ROOTFS_DIR/home/tokimo/bin/" | head -15
 echo "Python packages:"
