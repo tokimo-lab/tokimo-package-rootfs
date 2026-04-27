@@ -1,25 +1,27 @@
 # TokimoOS rootfs
 
-基于 **Debian 13 (Trixie)** 的精简容器文件系统。专为 [bwrap](https://github.com/containers/bubblewrap) 沙箱设计，开箱即用 Node.js + Python 环境。
+A minimal container filesystem based on **Debian 13 (Trixie)**, purpose-built for [bwrap](https://github.com/containers/bubblewrap) sandboxes.
 
-## 特性
+## Features
 
-- **轻量** — 经过深度精简，去除 systemd/init/PAM/桌面文件等沙箱无用内容
-- **自带运行时** — Node.js 24 + Python 3.13，预装 pnpm / ipython / requests
-- **工具齐全** — ffmpeg, git, vim, nano, curl, wget, dig, ping, rsync, jq, zstd 等
-- **中国镜像** — apt (清华源), npm (npmmirror), pip (清华源) 已配置
-- **apt 保留** — 缺什么随时 `apt install`
-- **Zstd 压缩发布** — Release 提供 `.tar.zst` 下载
+- **Slim** — heavily stripped of systemd, init, udev, PAM, desktop files, and other sandbox-irrelevant cruft
+- **Runtimes** — Node.js 24, Python 3.13, Lua 5.4, Go 1.24, Rust 1.85
+- **Office tools** — LibreOffice (headless), pandoc, poppler, qpdf, tesseract-ocr
+- **Python packages** — pypdf, pdfplumber, reportlab, pytesseract, pdf2image, pandas, openpyxl, markitdown, ipython, requests, rich, Pillow
+- **Node.js global** — pnpm, docx, pptxgenjs
+- **Media & network** — ffmpeg, git, curl, wget, dig, ping, rsync, jq, zstd
+- **China mirrors** — apt (Tsinghua), npm (npmmirror), pip (Tsinghua) pre-configured
+- **apt kept** — install anything else on demand
 
-## 快速使用
+## Quick start
 
 ```bash
-# 下载最新 rootfs
-wget https://github.com/tokimo-lab/tokimo-package-rootfs/releases/latest/download/rootfs.tar.zst
-zstd -d rootfs.tar.zst
-mkdir rootfs && tar -xpf rootfs.tar -C rootfs
+# Download latest rootfs
+wget https://github.com/tokimo-lab/tokimo-package-rootfs/releases/latest/download/rootfs-amd64.tar.zst
+zstd -d rootfs-amd64.tar.zst
+mkdir rootfs && tar -xpf rootfs-amd64.tar -C rootfs
 
-# bwrap 进入沙箱
+# Enter sandbox with bwrap
 exec bwrap \
   --bind rootfs / \
   --bind /tmp /tmp \
@@ -33,52 +35,57 @@ exec bwrap \
   /bin/bash --login
 ```
 
-## 预装清单
+## Pre-installed packages
 
-| 类别 | 内容 |
-|------|------|
-| **运行时** | Node.js 24, Python 3.13, pnpm |
-| **编辑** | vim, nano |
-| **网络** | curl, wget, dig (dnsutils), ping, rsync, git |
-| **媒体** | ffmpeg, ffprobe |
-| **压缩** | tar, gzip, bzip2, xz, zstd, zip, unzip |
-| **Python 包** | ipython, requests, rich |
-| **其他** | jq, ripgrep-style grep, bash-completion |
+| Category | Contents |
+|----------|----------|
+| **Runtimes** | Node.js 24, Python 3.13, Lua 5.4, Go 1.24, Rust 1.85 |
+| **Editors** | vim, nano |
+| **Network** | curl, wget, dig (dnsutils), ping, rsync, git |
+| **Media** | ffmpeg |
+| **Compression** | bzip2, xz, zstd, zip, unzip |
+| **Office / docs** | pandoc, libreoffice (headless), poppler-utils, qpdf, tesseract-ocr |
+| **Python** | ipython, requests, rich, pypdf, pdfplumber, reportlab, pytesseract, pdf2image, pandas, openpyxl, markitdown, Pillow |
+| **Node.js global** | pnpm, docx, pptxgenjs |
+| **Other** | jq, bash-completion |
 
-## 从源码构建
+## Building from source
 
-需要 Docker。
+Docker required. Supports amd64 and arm64.
 
 ```bash
 git clone https://github.com/tokimo-lab/tokimo-package-rootfs.git
 cd tokimo-package-rootfs
+
+# Build for amd64 (default)
 bash build.sh
+
+# Build for arm64
+bash build.sh arm64
 ```
 
-产物在 `./rootfs/` 目录，可直接搭配 `enter.sh` 进入沙箱。
+Output is at `./rootfs-amd64/` (or `./rootfs-arm64/`). Use `enter.sh` to drop into the sandbox.
 
-## 项目结构
+## Project structure
 
 ```
-├── build.sh          # 一键构建脚本 (Docker → rootfs)
-├── enter.sh          # bwrap 进入沙箱
-├── docker-modify.sh  # rootfs 导入 Docker 交互修改
-├── rootfs/           # 构建产物 (解包后的文件系统)
-│   ├── bin → usr/bin
-│   ├── etc/
-│   ├── usr/
-│   └── home/
-└── .github/workflows/build.yml  # CI: 构建 + Release
+├── build.sh              # One-shot build (Docker → rootfs)
+├── enter.sh              # Enter sandbox via bwrap
+├── docker-modify.sh      # Import rootfs into Docker for interactive modification
+├── .claude/skills/       # Claude Code skill definitions
+├── .github/workflows/    # CI: build + release
+└── rootfs-{arch}/        # Build artifact (extracted filesystem)
 ```
 
-## Release 下载
+## Release downloads
 
-访问 [Releases](https://github.com/tokimo-lab/tokimo-package-rootfs/releases) 页面获取最新构建的 `rootfs.tar.zst`。
+Visit [Releases](https://github.com/tokimo-lab/tokimo-package-rootfs/releases) for the latest pre-built `rootfs-*.tar.zst` files.
 
-文件名 | 说明
----|---
-`rootfs.tar.zst` | 完整 rootfs (Zstd 压缩)
-`sha256sum.txt` | 校验文件
+| File | Arch |
+|------|------|
+| `rootfs-amd64.tar.zst` | x86_64 / Intel Mac |
+| `rootfs-arm64.tar.zst` | aarch64 / Apple Silicon |
+| `sha256sum-{arch}.txt` | Checksum file |
 
 ## License
 
