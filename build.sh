@@ -93,8 +93,8 @@ index-url = https://pypi.tuna.tsinghua.edu.cn/simple
 trusted-host = pypi.tuna.tsinghua.edu.cn
 PIPEOF
 
-ln -sf ../../usr/bin/python3 /usr/local/bin/python
-ln -sf ../../usr/bin/lua5.4 /usr/local/bin/lua
+ln -sf ../../bin/python3 /usr/local/bin/python
+ln -sf ../../bin/lua5.4 /usr/local/bin/lua
 
 mkdir -p /home/tokimo/python_packages
 pip3 install --break-system-packages --target=/home/tokimo/python_packages \
