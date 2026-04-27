@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 进入 rootfs 交互环境（改动直接持久化到 rootfs/ 目录）
+# 进入 TokimoOS rootfs 沙箱
+# 改动直接写入 rootfs/ 目录，exit 后持久化，git commit 保存版本
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,13 +11,20 @@ if [ ! -d "$ROOTFS_DIR/usr" ]; then
   exit 1
 fi
 
-echo "进入 tokimo rootfs ... (exit 退出，改动自动保存)"
+echo "进入 TokimoOS 沙箱 ... (exit 退出，改动自动保存到 rootfs/)"
 exec bwrap \
   --bind "$ROOTFS_DIR" / \
   --bind /tmp /tmp \
   --proc /proc \
   --dev /dev \
   --ro-bind /etc/resolv.conf /etc/resolv.conf \
-  --setenv HOME /root \
+  --unshare-user \
+  --uid 1000 \
+  --gid 1000 \
+  --unshare-uts \
+  --hostname TokimoOS \
+  --setenv HOME /home/tokimo \
+  --setenv USER tokimo \
+  --setenv LOGNAME tokimo \
   --setenv TERM "${TERM:-xterm-256color}" \
   /bin/bash --login
