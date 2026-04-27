@@ -23,6 +23,7 @@ exec bwrap \
   --gid 1000 \
   --unshare-uts \
   --hostname TokimoOS \
+  --unsetenv LD_LIBRARY_PATH \
   --setenv HOME /home/tokimo \
   --setenv USER tokimo \
   --setenv LOGNAME tokimo \
