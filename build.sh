@@ -1,26 +1,49 @@
 #!/usr/bin/env bash
 # 一键构建 TokimoOS rootfs
 # 产物: ./rootfs/ (bwrap 使用, 用户 tokimo, 主目录 /home/tokimo)
+# 用法: bash build.sh [amd64|arm64]
 set -euo pipefail
 
-CONTAINER_NAME="tokimo-builder"
+ARCH="${1:-${TOKIMO_ARCH:-amd64}}"
+
+case "$ARCH" in
+  amd64|x86_64)
+    DOCKER_PLATFORM="linux/amd64"
+    GO_ARCH="amd64"
+    DEB_MULTIARCH="x86_64-linux-gnu"
+    ;;
+  arm64|aarch64)
+    DOCKER_PLATFORM="linux/arm64"
+    GO_ARCH="arm64"
+    DEB_MULTIARCH="aarch64-linux-gnu"
+    ;;
+  *)
+    echo "错误: 不支持的架构 '$ARCH' (支持: amd64, arm64)"
+    exit 1
+    ;;
+esac
+
+CONTAINER_NAME="tokimo-builder-${ARCH}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOTFS_DIR="$PROJECT_DIR/rootfs"
+ROOTFS_DIR="$PROJECT_DIR/rootfs-${ARCH}"
 ROOTFS_TAR="$PROJECT_DIR/rootfs.tar"
 
-echo "==> [1/4] 清理旧容器..."
+echo "==> [1/4] 清理旧容器 ($ARCH)..."
 docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 rm -rf "$ROOTFS_DIR"
 rm -f  "$ROOTFS_TAR"
 
-echo "==> [2/4] 启动构建容器 (debian:13 amd64)..."
+echo "==> [2/4] 启动构建容器 (debian:13 ${DOCKER_PLATFORM})..."
 docker run -dit \
   --name "$CONTAINER_NAME" \
-  --platform linux/amd64 \
+  --platform "$DOCKER_PLATFORM" \
   debian:13 bash
 
 echo "==> [3/4] 配置并安装软件..."
-docker exec -i "$CONTAINER_NAME" bash << 'BUILDER_SCRIPT'
+docker exec -i \
+  -e DEB_MULTIARCH="$DEB_MULTIARCH" \
+  -e GO_ARCH="$GO_ARCH" \
+  "$CONTAINER_NAME" bash << 'BUILDER_SCRIPT'
 set -euo pipefail
 
 # 先把 ca-certificates 装上，后面全程 HTTPS
@@ -60,7 +83,7 @@ npm config set --global registry https://registry.npmmirror.com
 npm config set --global prefix /home/tokimo
 npm install -g pnpm docx pptxgenjs
 
-curl -fsSL https://go.dev/dl/go1.24.4.linux-amd64.tar.gz | tar -C /usr/local -xz
+curl -fsSL "https://go.dev/dl/go1.24.4.linux-${GO_ARCH}.tar.gz" | tar -C /usr/local -xz
 ln -sf ../go/bin/go /usr/local/bin/go
 ln -sf ../go/bin/gofmt /usr/local/bin/gofmt
 
@@ -154,7 +177,7 @@ rm -rf /usr/include/node
 rm -rf /usr/share/perl /usr/share/perl5 /etc/perl
 
 # PulseAudio 库路径注册 (ffmpeg 依赖 libpulsecommon, 不在标准库路径)
-echo "/usr/lib/x86_64-linux-gnu/pulseaudio" > /etc/ld.so.conf.d/pulseaudio.conf
+echo "/usr/lib/${DEB_MULTIARCH}/pulseaudio" > /etc/ld.so.conf.d/pulseaudio.conf
 # LibreOffice 库路径注册
 echo "/usr/lib/libreoffice/program" > /etc/ld.so.conf.d/libreoffice.conf
 ldconfig
@@ -298,5 +321,6 @@ rm -f "$ROOTFS_TAR"
 rm -f "$PROJECT_DIR/build.sh.bak"
 
 echo ""
-echo "完成! rootfs 位于: $ROOTFS_DIR"
-echo "进入沙箱: bash enter.sh"
+echo "完成! rootfs (${ARCH}) 位于: $ROOTFS_DIR"
+echo "产物大小: $(du -sh "$ROOTFS_DIR" | cut -f1)"
+echo "进入沙箱: bwrap --bind $ROOTFS_DIR / ..."

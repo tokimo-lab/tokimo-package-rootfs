@@ -14,43 +14,64 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
     permissions:
       contents: write
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build rootfs
-        run: bash build.sh
+      - name: Set up QEMU (for cross-platform build)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build rootfs (${{ matrix.arch }})
+        run: bash build.sh ${{ matrix.arch }}
 
       - name: Compress with zstd
         run: |
-          tar -cpf rootfs.tar rootfs
-          zstd -10 -T0 rootfs.tar -o rootfs.tar.zst
-          sha256sum rootfs.tar.zst > sha256sum.txt
+          tar -cpf rootfs.tar rootfs-${{ matrix.arch }}
+          zstd -10 -T0 rootfs.tar -o rootfs-${{ matrix.arch }}.tar.zst
+          sha256sum rootfs-${{ matrix.arch }}.tar.zst > sha256sum-${{ matrix.arch }}.txt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rootfs
+          name: rootfs-${{ matrix.arch }}
           path: |
-            rootfs.tar.zst
-            sha256sum.txt
+            rootfs-${{ matrix.arch }}.tar.zst
+            sha256sum-${{ matrix.arch }}.txt
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            rootfs.tar.zst
-            sha256sum.txt
+            rootfs-${{ matrix.arch }}.tar.zst
+            sha256sum-${{ matrix.arch }}.txt
           body: |
             TokimoOS rootfs ${{ github.ref_name }}
+
+            ## 架构
+
+            | 文件 | 架构 |
+            |------|------|
+            | `rootfs-amd64.tar.zst` | x86_64 / Intel Mac |
+            | `rootfs-arm64.tar.zst` | aarch64 / Apple Silicon |
 
             ## 使用
 
             ```bash
-            zstd -d rootfs.tar.zst
-            mkdir rootfs && tar -xpf rootfs.tar -C rootfs
+            # Intel Mac
+            curl -LO ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}/rootfs-amd64.tar.zst
+            zstd -d rootfs-amd64.tar.zst
+            mkdir rootfs && tar -xpf rootfs-amd64.tar -C rootfs
+
+            # Apple Silicon
+            curl -LO ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}/rootfs-arm64.tar.zst
+            zstd -d rootfs-arm64.tar.zst
+            mkdir rootfs && tar -xpf rootfs-arm64.tar -C rootfs
             ```
           make_latest: true
