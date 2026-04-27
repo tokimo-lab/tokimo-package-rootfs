@@ -26,7 +26,7 @@ jobs:
       - name: Compress with zstd
         run: |
           tar -cpf rootfs.tar rootfs
-          zstd -19 -T0 rootfs.tar -o rootfs.tar.zst
+          zstd -10 -T0 rootfs.tar -o rootfs.tar.zst
           sha256sum rootfs.tar.zst > sha256sum.txt
 
       - name: Upload artifact
