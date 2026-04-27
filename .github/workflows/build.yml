@@ -1,0 +1,55 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build rootfs
+        run: bash build.sh
+
+      - name: Compress with zstd
+        run: |
+          zstd -19 -T0 rootfs.tar -o rootfs.tar.zst
+          sha256sum rootfs.tar.zst > sha256sum.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rootfs
+          path: |
+            rootfs.tar.zst
+            sha256sum.txt
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            rootfs.tar.zst
+            sha256sum.txt
+          body: |
+            TokimoOS rootfs ${{ github.ref_name }}
+
+            ## 使用
+
+            ```bash
+            zstd -d rootfs.tar.zst
+            mkdir rootfs && tar -xpf rootfs.tar -C rootfs
+            ```
+          make_latest: true
