@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 把现有 rootfs/ 导入 Docker，交互修改后重新导出
-# 适合需要 apt install 等操作的场景
+# 适合需要 apt install 等重型操作的场景
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

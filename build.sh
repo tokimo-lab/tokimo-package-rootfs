@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 一键构建 tokimo rootfs
-# 产物: ./rootfs/ (可直接给 bwrap 使用)
+# 一键构建 TokimoOS rootfs
+# 产物: ./rootfs/ (bwrap 使用, 用户 tokimo, 主目录 /home/tokimo)
 set -euo pipefail
 
 CONTAINER_NAME="tokimo-builder"
@@ -23,7 +23,6 @@ echo "==> [3/4] 配置并安装软件..."
 docker exec -i "$CONTAINER_NAME" bash << 'BUILDER_SCRIPT'
 set -euo pipefail
 
-# ── APT: 切换清华大学镜像 ─────────────────────────────────────────────────────
 cat > /etc/apt/sources.list << 'APTEOF'
 deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm main contrib non-free non-free-firmware
 deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-updates main contrib non-free non-free-firmware
@@ -32,71 +31,130 @@ APTEOF
 
 apt-get update -qq
 
-# ── 基础工具 ──────────────────────────────────────────────────────────────────
-apt-get install -y --no-install-recommends \
-  curl wget git ca-certificates gnupg lsb-release \
-  build-essential pkg-config \
-  vim nano less procps htop \
-  ripgrep fd-find jq unzip zip \
-  python3 python3-pip python3-venv
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+  curl ca-certificates gnupg \
+  git vim nano less procps htop \
+  ripgrep fd-find jq unzip zip wget \
+  python3 python3-pip python3-venv \
+  bash-completion
 
-# ── Node.js 24 (nodesource) ──────────────────────────────────────────────────
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
-apt-get install -y nodejs
+DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
 corepack enable
 
-# ── npm: 切换 npmmirror + prefix 指向 /tmp ──────────────────────────────────
-npm config set --global registry https://registry.npmmirror.com
-npm config set --global prefix /tmp
+groupadd -g 1000 tokimo
+useradd -m -u 1000 -g 1000 -s /bin/bash -d /home/tokimo tokimo
 
-# ── Node 包: npm -g 安装到 /tmp ──────────────────────────────────────────────
-mkdir -p /tmp
+npm config set --global registry https://registry.npmmirror.com
+npm config set --global prefix /home/tokimo
 npm install -g pnpm tsx typescript ts-node nodemon
 
-# ── pip: 清华 PyPI 镜像 ───────────────────────────────────────────────────────
-mkdir -p /etc/pip
 cat > /etc/pip.conf << 'PIPEOF'
 [global]
 index-url = https://pypi.tuna.tsinghua.edu.cn/simple
 trusted-host = pypi.tuna.tsinghua.edu.cn
 PIPEOF
 
-# ── Python 包: 安装到 /tmp/python_packages ────────────────────────────────────
-mkdir -p /tmp/python_packages
-pip3 install --break-system-packages --target=/tmp/python_packages \
+mkdir -p /home/tokimo/python_packages
+pip3 install --break-system-packages --target=/home/tokimo/python_packages \
   python-dotenv requests httpx pydantic ipython rich
 
-# ── 环境变量: profile.d (login shell) ────────────────────────────────────────
+echo "TokimoOS" > /etc/hostname
+
+cat > /etc/os-release << 'OSEOF'
+PRETTY_NAME="TokimoOS 1.0"
+NAME="TokimoOS"
+ID=tokimoos
+ID_LIKE=debian
+VERSION_ID="1.0"
+HOME_URL="https://tokimo.io"
+OSEOF
+
 cat > /etc/profile.d/tokimo_env.sh << 'ENVEOF'
-# tokimo sandbox environment
-export NPM_CONFIG_PREFIX=/tmp
-export NODE_PATH=/tmp/lib/node_modules
-export PATH=/tmp/bin:$PATH
-export PYTHONPATH=/tmp/python_packages${PYTHONPATH:+:$PYTHONPATH}
-export PIP_TARGET=/tmp/python_packages
+export HOME=/home/tokimo
+export USER=tokimo
+export LOGNAME=tokimo
+export NPM_CONFIG_PREFIX=/home/tokimo
+export NODE_PATH=/home/tokimo/lib/node_modules
+export PATH=/home/tokimo/bin:/usr/local/bin:/usr/bin:/bin
+export PYTHONPATH=/home/tokimo/python_packages${PYTHONPATH:+:$PYTHONPATH}
+export PIP_TARGET=/home/tokimo/python_packages
 export npm_config_registry=https://registry.npmmirror.com
 ENVEOF
 chmod +x /etc/profile.d/tokimo_env.sh
 
-# ── 同样写到 bash.bashrc (非 login 交互 shell) ────────────────────────────────
-cat >> /etc/bash.bashrc << 'BASHRCEOF'
-
-# tokimo sandbox environment
-if [ -f /etc/profile.d/tokimo_env.sh ]; then
-    . /etc/profile.d/tokimo_env.sh
-fi
+cat > /etc/bash.bashrc << 'BASHRCEOF'
+for f in /etc/profile.d/*.sh; do [ -r "$f" ] && . "$f"; done
+unset f
+[ -f ~/.bashrc ] && . ~/.bashrc
 BASHRCEOF
 
-# ── 清理 apt 缓存 (保留 /tmp 里的包) ─────────────────────────────────────────
+cat > /home/tokimo/.bashrc << 'DOTBASHRC'
+export HISTSIZE=10000
+export HISTFILESIZE=20000
+export HISTCONTROL=ignoredups:erasedups
+shopt -s histappend
+
+PS1='[\[\033[35;1m\]\u\[\033[0m\]@\[\033[31;1m\]TokimoOS\[\033[0m\]:\[\033[32;1m\]$PWD\[\033[0m\]]\$ '
+
+alias ls='ls --color=auto'
+alias ll='ls -lah --color=auto'
+alias la='ls -A --color=auto'
+alias grep='grep --color=auto'
+alias egrep='egrep --color=auto'
+alias fgrep='fgrep --color=auto'
+alias rm='rm -i'
+alias cp='cp -i'
+alias mv='mv -i'
+
+if [ -f /usr/share/bash-completion/bash_completion ]; then
+    . /usr/share/bash-completion/bash_completion 2>/dev/null || true
+fi
+DOTBASHRC
+
+cat > /home/tokimo/.bash_profile << 'DOTPROFILE'
+[ -f ~/.bashrc ] && . ~/.bashrc
+DOTPROFILE
+
+cat > /home/tokimo/.inputrc << 'DOTINPUTRC'
+set completion-ignore-case on
+set show-all-if-ambiguous on
+set show-all-if-unmodified on
+set colored-stats on
+set mark-symlinked-directories on
+set visible-stats on
+DOTINPUTRC
+
+chown -R tokimo:tokimo /home/tokimo
+
+rm -rf \
+  /usr/share/man \
+  /usr/share/doc \
+  /usr/share/locale \
+  /usr/share/info \
+  /usr/share/lintian \
+  /usr/share/common-licenses
+
 apt-get clean
-rm -rf /var/lib/apt/lists/* /var/tmp/*
+rm -rf \
+  /var/lib/apt/lists/* \
+  /var/cache/apt \
+  /var/log/apt \
+  /var/log/*.log \
+  /root/.npm \
+  /root/.cache \
+  /home/tokimo/.cache \
+  /tmp/* \
+  /var/tmp/*
+
+find / -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
+find / -name '*.pyc' -delete 2>/dev/null || true
 
 echo "--- 验证 ---"
 node --version
 python3 --version
-python3 -c "import sys; print('PYTHONPATH will include /tmp/python_packages')"
-ls /tmp/bin/ | head -10
-ls /tmp/python_packages/ | head -10
+ls /home/tokimo/bin/ | head -10
+ls /home/tokimo/python_packages/ | grep -v dist-info | grep -v __pycache__ | head -15
 BUILDER_SCRIPT
 
 echo "==> [4/4] 导出 & 解包 rootfs..."
@@ -115,15 +173,16 @@ tar -xpf "$ROOTFS_TAR" \
 echo "--- 最终验证 ---"
 "$ROOTFS_DIR/usr/bin/node" --version
 "$ROOTFS_DIR/usr/bin/python3" --version
-echo "Node packages (npm -g -> /tmp/bin):"
-ls "$ROOTFS_DIR/tmp/bin/" | head -10
+echo "Node bins:"
+ls "$ROOTFS_DIR/home/tokimo/bin/" | head -10
 echo "Python packages:"
-ls "$ROOTFS_DIR/tmp/python_packages/" | head -10
+ls "$ROOTFS_DIR/home/tokimo/python_packages/" | grep -v dist-info | grep -v __pycache__ | head -15
 
-echo "==> 清理容器和 tar..."
+echo "==> 清理..."
 docker rm -f "$CONTAINER_NAME"
 rm -f "$ROOTFS_TAR"
+rm -f "$PROJECT_DIR/build.sh.bak"
 
 echo ""
 echo "完成! rootfs 位于: $ROOTFS_DIR"
-echo "bwrap 示例: bwrap --bind \$ROOTFS_DIR / --bind /tmp /tmp --proc /proc --dev /dev bash"
+echo "进入沙箱: bash enter.sh"
