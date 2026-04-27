@@ -47,7 +47,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   bash-completion \
   pandoc poppler-utils qpdf tesseract-ocr \
   libreoffice-writer libreoffice-impress libreoffice-calc \
-  lua5.4 golang-go rustc cargo
+  lua5.4 rustc cargo
 
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
 DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
@@ -59,6 +59,10 @@ useradd -m -u 1000 -g 1000 -s /bin/bash -d /home/tokimo tokimo
 npm config set --global registry https://registry.npmmirror.com
 npm config set --global prefix /home/tokimo
 npm install -g pnpm docx pptxgenjs
+
+curl -fsSL https://go.dev/dl/go1.24.4.linux-amd64.tar.gz | tar -C /usr/local -xz
+ln -sf /usr/local/go/bin/go /usr/local/bin/go
+ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
 
 cat > /etc/pip.conf << 'PIPEOF'
 [global]
@@ -151,6 +155,8 @@ rm -rf /usr/share/perl /usr/share/perl5 /etc/perl
 
 # PulseAudio 库路径注册 (ffmpeg 依赖 libpulsecommon, 不在标准库路径)
 echo "/usr/lib/x86_64-linux-gnu/pulseaudio" > /etc/ld.so.conf.d/pulseaudio.conf
+# LibreOffice 库路径注册
+echo "/usr/lib/libreoffice/program" > /etc/ld.so.conf.d/libreoffice.conf
 ldconfig
 
 # Scalar (Git 大仓库管理工具)
@@ -270,16 +276,16 @@ tar -xpf "$ROOTFS_TAR" \
   -C "$ROOTFS_DIR" \
   --numeric-owner \
   --no-same-owner \
-  --exclude='dev/*' \
-  --exclude='proc/*' \
-  --exclude='sys/*'
+  --exclude='./dev/*' \
+  --exclude='./proc/*' \
+  --exclude='./sys/*'
 
 echo "--- 最终验证 ---"
 "$ROOTFS_DIR/usr/bin/node" --version
 "$ROOTFS_DIR/usr/bin/python3" --version
 "$ROOTFS_DIR/usr/local/bin/python" --version
 "$ROOTFS_DIR/usr/local/bin/lua" -v
-"$ROOTFS_DIR/usr/bin/go" version
+"$ROOTFS_DIR/usr/local/bin/go" version
 "$ROOTFS_DIR/usr/bin/rustc" --version
 echo "Node bins:"
 ls "$ROOTFS_DIR/home/tokimo/bin/" | head -15
