@@ -1,6 +1,8 @@
 # 构建产物 (体积大，不入库)
 rootfs/
 rootfs.tar
+rootfs.tar.zst
+sha256sum.txt
 *.tar
 
 # 编辑器
