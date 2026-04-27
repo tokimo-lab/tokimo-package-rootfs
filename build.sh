@@ -9,12 +9,10 @@ ARCH="${1:-${TOKIMO_ARCH:-amd64}}"
 case "$ARCH" in
   amd64|x86_64)
     DOCKER_PLATFORM="linux/amd64"
-    GO_ARCH="amd64"
     DEB_MULTIARCH="x86_64-linux-gnu"
     ;;
   arm64|aarch64)
     DOCKER_PLATFORM="linux/arm64"
-    GO_ARCH="arm64"
     DEB_MULTIARCH="aarch64-linux-gnu"
     ;;
   *)
@@ -42,7 +40,6 @@ docker run -dit \
 echo "==> [3/4] 配置并安装软件..."
 docker exec -i \
   -e DEB_MULTIARCH="$DEB_MULTIARCH" \
-  -e GO_ARCH="$GO_ARCH" \
   "$CONTAINER_NAME" bash << 'BUILDER_SCRIPT'
 set -euo pipefail
 
@@ -70,7 +67,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   bash-completion \
   pandoc poppler-utils qpdf tesseract-ocr \
   libreoffice-writer libreoffice-impress libreoffice-calc \
-  lua5.4 rustc cargo
+  lua5.4
 
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
 DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
@@ -82,10 +79,6 @@ useradd -m -u 1000 -g 1000 -s /bin/bash -d /home/tokimo tokimo
 npm config set --global registry https://registry.npmmirror.com
 npm config set --global prefix /home/tokimo
 npm install -g pnpm docx pptxgenjs
-
-curl -fsSL "https://go.dev/dl/go1.24.4.linux-${GO_ARCH}.tar.gz" | tar -C /usr/local -xz
-ln -sf ../go/bin/go /usr/local/bin/go
-ln -sf ../go/bin/gofmt /usr/local/bin/gofmt
 
 cat > /etc/pip.conf << 'PIPEOF'
 [global]
@@ -119,8 +112,7 @@ export USER=tokimo
 export LOGNAME=tokimo
 export NPM_CONFIG_PREFIX=/home/tokimo
 export NODE_PATH=/home/tokimo/lib/node_modules
-export PATH=/home/tokimo/bin:/home/tokimo/go/bin:/usr/local/bin:/usr/bin:/bin
-export GOPATH=/home/tokimo/go
+export PATH=/home/tokimo/bin:/usr/local/bin:/usr/bin:/bin
 export PYTHONPATH=/home/tokimo/python_packages${PYTHONPATH:+:$PYTHONPATH}
 export PIP_TARGET=/home/tokimo/python_packages
 export npm_config_registry=https://registry.npmmirror.com
@@ -200,7 +192,7 @@ find /usr/share/vim/vim*/syntax -type f ! -name 'markdown.vim' ! -name 'text.vim
   ! -name 'diff.vim' ! -name 'csv.vim' ! -name 'toml.vim' \
   ! -name 'sql.vim' ! -name 'log.vim' ! -name 'dosini.vim' \
   ! -name 'cmake.vim' ! -name 'make.vim' \
-  ! -name 'lua.vim' ! -name 'go.vim' ! -name 'rust.vim' \
+  ! -name 'lua.vim' \
   -delete 2>/dev/null || true
 
 # systemd / init / udev (bwrap 无 init 系统)
@@ -279,9 +271,6 @@ node --version
 python3 --version
 python --version
 lua -v
-go version
-rustc --version
-cargo --version
 pandoc --version | head -1
 pdftoppm -v 2>&1 | head -1
 qpdf --version 2>&1 | head -1
@@ -313,8 +302,6 @@ LD_LIB="$ROOTFS_DIR/usr/lib/${DEB_MULTIARCH}:$ROOTFS_DIR/lib/${DEB_MULTIARCH}:$R
 "$LD_LINUX" --library-path "$LD_LIB" "$ROOTFS_DIR/usr/bin/python3" --version
 "$LD_LINUX" --library-path "$LD_LIB" "$ROOTFS_DIR/usr/local/bin/python" --version
 "$LD_LINUX" --library-path "$LD_LIB" "$ROOTFS_DIR/usr/local/bin/lua" -v
-"$LD_LINUX" --library-path "$LD_LIB" "$ROOTFS_DIR/usr/local/bin/go" version
-"$LD_LINUX" --library-path "$LD_LIB" "$ROOTFS_DIR/usr/bin/rustc" --version
 echo "Node bins:"
 ls "$ROOTFS_DIR/home/tokimo/bin/" | head -15
 echo "Python packages:"
