@@ -44,7 +44,10 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   iputils-ping rsync \
   dnsutils ffmpeg \
   python3 python3-pip python3-venv \
-  bash-completion
+  bash-completion \
+  pandoc poppler-utils qpdf tesseract-ocr \
+  libreoffice-writer libreoffice-impress libreoffice-calc \
+  lua5.4 golang-go rustc cargo
 
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
 DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
@@ -55,7 +58,7 @@ useradd -m -u 1000 -g 1000 -s /bin/bash -d /home/tokimo tokimo
 
 npm config set --global registry https://registry.npmmirror.com
 npm config set --global prefix /home/tokimo
-npm install -g pnpm
+npm install -g pnpm docx pptxgenjs
 
 cat > /etc/pip.conf << 'PIPEOF'
 [global]
@@ -63,9 +66,14 @@ index-url = https://pypi.tuna.tsinghua.edu.cn/simple
 trusted-host = pypi.tuna.tsinghua.edu.cn
 PIPEOF
 
+ln -sf /usr/bin/python3 /usr/local/bin/python
+ln -sf /usr/bin/lua5.4 /usr/local/bin/lua
+
 mkdir -p /home/tokimo/python_packages
 pip3 install --break-system-packages --target=/home/tokimo/python_packages \
-  requests ipython rich
+  requests ipython rich \
+  pypdf pdfplumber reportlab pytesseract pdf2image \
+  pandas openpyxl "markitdown[pptx]" Pillow
 
 echo "TokimoOS" > /etc/hostname
 
@@ -84,7 +92,8 @@ export USER=tokimo
 export LOGNAME=tokimo
 export NPM_CONFIG_PREFIX=/home/tokimo
 export NODE_PATH=/home/tokimo/lib/node_modules
-export PATH=/home/tokimo/bin:/usr/local/bin:/usr/bin:/bin
+export PATH=/home/tokimo/bin:/home/tokimo/go/bin:/usr/local/bin:/usr/bin:/bin
+export GOPATH=/home/tokimo/go
 export PYTHONPATH=/home/tokimo/python_packages${PYTHONPATH:+:$PYTHONPATH}
 export PIP_TARGET=/home/tokimo/python_packages
 export npm_config_registry=https://registry.npmmirror.com
@@ -144,9 +153,6 @@ rm -rf /usr/share/perl /usr/share/perl5 /etc/perl
 echo "/usr/lib/x86_64-linux-gnu/pulseaudio" > /etc/ld.so.conf.d/pulseaudio.conf
 ldconfig
 
-# Rust/Cargo
-rm -rf /usr/lib/cargo
-
 # Scalar (Git 大仓库管理工具)
 rm -rf /usr/bin/scalar /usr/share/man/man1/scalar* 2>/dev/null || true
 
@@ -164,7 +170,9 @@ find /usr/share/vim/vim*/syntax -type f ! -name 'markdown.vim' ! -name 'text.vim
   ! -name 'conf.vim' ! -name 'gitcommit.vim' ! -name 'gitconfig.vim' \
   ! -name 'diff.vim' ! -name 'csv.vim' ! -name 'toml.vim' \
   ! -name 'sql.vim' ! -name 'log.vim' ! -name 'dosini.vim' \
-  ! -name 'cmake.vim' ! -name 'make.vim' -delete 2>/dev/null || true
+  ! -name 'cmake.vim' ! -name 'make.vim' \
+  ! -name 'lua.vim' ! -name 'go.vim' ! -name 'rust.vim' \
+  -delete 2>/dev/null || true
 
 # systemd / init / udev (bwrap 无 init 系统)
 rm -rf /usr/lib/systemd /usr/lib/init /etc/systemd /etc/init.d
@@ -240,9 +248,17 @@ find / -name '*.pyc' -delete 2>/dev/null || true
 echo "--- 验证 ---"
 node --version
 python3 --version
+python --version
+lua -v
+go version
+rustc --version
+cargo --version
+pandoc --version | head -1
+pdftoppm -v 2>&1 | head -1
+qpdf --version 2>&1 | head -1
 dig -v 2>&1 | head -1
-ls /home/tokimo/bin/ | head -10
-ls /home/tokimo/python_packages/ | grep -v dist-info | grep -v __pycache__ | head -15
+ls /home/tokimo/bin/ | head -15
+ls /home/tokimo/python_packages/ | grep -v dist-info | grep -v __pycache__ | head -20
 BUILDER_SCRIPT
 
 echo "==> [4/4] 导出 & 解包 rootfs..."
@@ -261,11 +277,14 @@ tar -xpf "$ROOTFS_TAR" \
 echo "--- 最终验证 ---"
 "$ROOTFS_DIR/usr/bin/node" --version
 "$ROOTFS_DIR/usr/bin/python3" --version
-"$ROOTFS_DIR/usr/bin/dig" -v 2>&1 | head -1 || echo "dig: ok"
+"$ROOTFS_DIR/usr/local/bin/python" --version
+"$ROOTFS_DIR/usr/local/bin/lua" -v
+"$ROOTFS_DIR/usr/bin/go" version
+"$ROOTFS_DIR/usr/bin/rustc" --version
 echo "Node bins:"
-ls "$ROOTFS_DIR/home/tokimo/bin/" | head -10
+ls "$ROOTFS_DIR/home/tokimo/bin/" | head -15
 echo "Python packages:"
-ls "$ROOTFS_DIR/home/tokimo/python_packages/" | grep -v dist-info | grep -v __pycache__ | head -15
+ls "$ROOTFS_DIR/home/tokimo/python_packages/" | grep -v dist-info | grep -v __pycache__ | head -20
 
 echo "==> 清理..."
 docker rm -f "$CONTAINER_NAME"
