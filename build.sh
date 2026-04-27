@@ -45,14 +45,13 @@ curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
 apt-get install -y nodejs
 corepack enable
 
-# ── npm: 切换 npmmirror ───────────────────────────────────────────────────────
+# ── npm: 切换 npmmirror + prefix 指向 /tmp ──────────────────────────────────
 npm config set --global registry https://registry.npmmirror.com
+npm config set --global prefix /tmp
 
-# ── Node 包: 安装到 /tmp/node_modules ─────────────────────────────────────────
+# ── Node 包: npm -g 安装到 /tmp ──────────────────────────────────────────────
 mkdir -p /tmp
-cd /tmp
-npm init -y
-npm install pnpm tsx typescript ts-node nodemon
+npm install -g pnpm tsx typescript ts-node nodemon
 
 # ── pip: 清华 PyPI 镜像 ───────────────────────────────────────────────────────
 mkdir -p /etc/pip
@@ -70,8 +69,9 @@ pip3 install --break-system-packages --target=/tmp/python_packages \
 # ── 环境变量: profile.d (login shell) ────────────────────────────────────────
 cat > /etc/profile.d/tokimo_env.sh << 'ENVEOF'
 # tokimo sandbox environment
-export NODE_PATH=/tmp/node_modules
-export PATH=/tmp/node_modules/.bin:$PATH
+export NPM_CONFIG_PREFIX=/tmp
+export NODE_PATH=/tmp/lib/node_modules
+export PATH=/tmp/bin:$PATH
 export PYTHONPATH=/tmp/python_packages${PYTHONPATH:+:$PYTHONPATH}
 export PIP_TARGET=/tmp/python_packages
 export npm_config_registry=https://registry.npmmirror.com
@@ -95,7 +95,7 @@ echo "--- 验证 ---"
 node --version
 python3 --version
 python3 -c "import sys; print('PYTHONPATH will include /tmp/python_packages')"
-ls /tmp/node_modules/.bin/ | head -10
+ls /tmp/bin/ | head -10
 ls /tmp/python_packages/ | head -10
 BUILDER_SCRIPT
 
@@ -115,8 +115,8 @@ tar -xpf "$ROOTFS_TAR" \
 echo "--- 最终验证 ---"
 "$ROOTFS_DIR/usr/bin/node" --version
 "$ROOTFS_DIR/usr/bin/python3" --version
-echo "Node packages:"
-ls "$ROOTFS_DIR/tmp/node_modules/.bin/" | head -10
+echo "Node packages (npm -g -> /tmp/bin):"
+ls "$ROOTFS_DIR/tmp/bin/" | head -10
 echo "Python packages:"
 ls "$ROOTFS_DIR/tmp/python_packages/" | head -10
 
