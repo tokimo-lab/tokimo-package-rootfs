@@ -1,11 +1,14 @@
-# 构建产物 (体积大，不入库)
+# Build artifacts (too large for git)
 rootfs/
 rootfs.tar
 rootfs.tar.zst
-sha256sum.txt
+sha256sum*.txt
 *.tar
+tokimo-os-*/
+initrd-*/
+*.img
 
-# 编辑器
+# Editors
 .idea/
 .vscode/
 *.swp

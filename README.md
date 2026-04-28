@@ -1,11 +1,23 @@
-# TokimoOS rootfs
+# TokimoOS
 
-A minimal container filesystem based on **Debian 13 (Trixie)**, purpose-built for [bwrap](https://github.com/containers/bubblewrap) sandboxes.
+A minimal Linux OS bundle (kernel + initrd + Debian rootfs) for sandbox VMs.
+
+Used by [tokimo-package-sandbox](https://github.com/tokimo-lab/tokimo-package-sandbox) on macOS (Virtualization.framework) and Windows (Hyper-V/HCS).
+
+## What's included
+
+| Artifact | Description |
+|----------|------------|
+| `vmlinuz` | Linux kernel (cloud-image, virtio + 9p drivers) |
+| `initrd.img` | initramfs with busybox + tokimo init script |
+| `rootfs/` | Debian 13 (Trixie) filesystem, heavily stripped |
+
+The initrd init script auto-detects the shared filesystem mount type (virtiofs on macOS, 9p on Windows HCS) and runs the same command execution logic on both platforms.
 
 ## Features
 
-- **Slim** — heavily stripped of systemd, init, udev, PAM, desktop files, and other sandbox-irrelevant cruft
-- **Runtimes** — Node.js 24, Python 3.13, Lua 5.4, Go 1.24, Rust 1.85
+- **Slim** — heavily stripped of systemd, init, udev, PAM, desktop files
+- **Runtimes** — Node.js 24, Python 3.13, Lua 5.4
 - **Office tools** — LibreOffice (headless), pandoc, poppler, qpdf, tesseract-ocr
 - **Python packages** — pypdf, pdfplumber, reportlab, pytesseract, pdf2image, pandas, openpyxl, markitdown, ipython, requests, rich, Pillow
 - **Node.js global** — pnpm, docx, pptxgenjs
@@ -16,38 +28,21 @@ A minimal container filesystem based on **Debian 13 (Trixie)**, purpose-built fo
 ## Quick start
 
 ```bash
-# Download latest rootfs
-wget https://github.com/tokimo-lab/tokimo-package-rootfs/releases/latest/download/rootfs-amd64.tar.zst
+# Download latest TokimoOS bundle (kernel + initrd)
+curl -LO https://github.com/tokimo-lab/tokimo-package-rootfs/releases/latest/download/tokimo-os-amd64.tar.zst
+zstd -d tokimo-os-amd64.tar.zst
+mkdir -p ~/.tokimo/kernel
+tar -xpf tokimo-os-amd64.tar -C ~/.tokimo/
+
+# Download rootfs
+curl -LO https://github.com/tokimo-lab/tokimo-package-rootfs/releases/latest/download/rootfs-amd64.tar.zst
 zstd -d rootfs-amd64.tar.zst
-mkdir rootfs && tar -xpf rootfs-amd64.tar -C rootfs
+mkdir -p ~/.tokimo/rootfs
+tar -xpf rootfs-amd64.tar -C ~/.tokimo/rootfs
 
-# Enter sandbox with bwrap
-exec bwrap \
-  --bind rootfs / \
-  --bind /tmp /tmp \
-  --proc /proc \
-  --dev /dev \
-  --ro-bind /etc/resolv.conf /etc/resolv.conf \
-  --unshare-user \
-  --uid 1000 \
-  --gid 1000 \
-  --hostname TokimoOS \
-  /bin/bash --login
+# Or build from source
+bash build.sh amd64 && bash install.sh amd64
 ```
-
-## Pre-installed packages
-
-| Category | Contents |
-|----------|----------|
-| **Runtimes** | Node.js 24, Python 3.13, Lua 5.4, Go 1.24, Rust 1.85 |
-| **Editors** | vim, nano |
-| **Network** | curl, wget, dig (dnsutils), ping, rsync, git |
-| **Media** | ffmpeg |
-| **Compression** | bzip2, xz, zstd, zip, unzip |
-| **Office / docs** | pandoc, libreoffice (headless), poppler-utils, qpdf, tesseract-ocr |
-| **Python** | ipython, requests, rich, pypdf, pdfplumber, reportlab, pytesseract, pdf2image, pandas, openpyxl, markitdown, Pillow |
-| **Node.js global** | pnpm, docx, pptxgenjs |
-| **Other** | jq, bash-completion |
 
 ## Building from source
 
@@ -57,35 +52,46 @@ Docker required. Supports amd64 and arm64.
 git clone https://github.com/tokimo-lab/tokimo-package-rootfs.git
 cd tokimo-package-rootfs
 
-# Build for amd64 (default)
+# Build (amd64 default)
 bash build.sh
 
-# Build for arm64
+# Build for arm64 (Apple Silicon)
 bash build.sh arm64
+
+# Install to ~/.tokimo/
+bash install.sh amd64
 ```
 
-Output is at `./rootfs-amd64/` (or `./rootfs-arm64/`). Use `enter.sh` to drop into the sandbox.
+Output at `./tokimo-os-{arch}/`:
+```
+tokimo-os-amd64/
+├── vmlinuz       # Linux kernel
+├── initrd.img    # initramfs (busybox + init.sh)
+└── rootfs/       # Debian filesystem
+```
 
 ## Project structure
 
 ```
-├── build.sh              # One-shot build (Docker → rootfs)
-├── enter.sh              # Enter sandbox via bwrap
+├── build.sh              # One-shot build (Docker → kernel + initrd + rootfs)
+├── init.sh               # Initrd PID 1 script
+├── install.sh            # Install to ~/.tokimo/
+├── enter.sh              # Enter rootfs via bwrap for testing
 ├── docker-modify.sh      # Import rootfs into Docker for interactive modification
-├── .claude/skills/       # Claude Code skill definitions
-├── .github/workflows/    # CI: build + release
-└── rootfs-{arch}/        # Build artifact (extracted filesystem)
+├── .github/workflows/    # CI: build + release (tokimo-os + rootfs artifacts)
+└── tokimo-os-{arch}/     # Build artifact (git-ignored)
 ```
 
 ## Release downloads
 
-Visit [Releases](https://github.com/tokimo-lab/tokimo-package-rootfs/releases) for the latest pre-built `rootfs-*.tar.zst` files.
+Visit [Releases](https://github.com/tokimo-lab/tokimo-package-rootfs/releases).
 
-| File | Arch |
-|------|------|
-| `rootfs-amd64.tar.zst` | x86_64 / Intel Mac |
-| `rootfs-arm64.tar.zst` | aarch64 / Apple Silicon |
-| `sha256sum-{arch}.txt` | Checksum file |
+| File | Contents | Arch |
+|------|----------|------|
+| `tokimo-os-amd64.tar.zst` | kernel + initrd | x86_64 (Intel Mac / Windows) |
+| `tokimo-os-arm64.tar.zst` | kernel + initrd | aarch64 (Apple Silicon) |
+| `rootfs-amd64.tar.zst` | Debian rootfs | x86_64 |
+| `rootfs-arm64.tar.zst` | Debian rootfs | aarch64 |
 
 ## License
 

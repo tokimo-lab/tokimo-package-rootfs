@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# 一键构建 TokimoOS rootfs
-# 产物: ./rootfs/ (bwrap 使用, 用户 tokimo, 主目录 /home/tokimo)
-# 用法: bash build.sh [amd64|arm64]
+# Build TokimoOS: kernel + initrd + rootfs
+# Output: ./tokimo-os-{arch}/
+#         ├── vmlinuz       # Linux kernel
+#         ├── initrd.img    # initramfs with busybox + init.sh
+#         └── rootfs/       # Debian 13 rootfs
+#
+# Usage: bash build.sh [amd64|arm64]
 set -euo pipefail
 
 ARCH="${1:-${TOKIMO_ARCH:-amd64}}"
@@ -16,39 +20,39 @@ case "$ARCH" in
     DEB_MULTIARCH="aarch64-linux-gnu"
     ;;
   *)
-    echo "错误: 不支持的架构 '$ARCH' (支持: amd64, arm64)"
+    echo "error: unsupported arch '$ARCH' (amd64, arm64)"
     exit 1
     ;;
 esac
 
 CONTAINER_NAME="tokimo-builder-${ARCH}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOTFS_DIR="$PROJECT_DIR/rootfs-${ARCH}"
+OUTPUT_DIR="$PROJECT_DIR/tokimo-os-${ARCH}"
+ROOTFS_DIR="$OUTPUT_DIR/rootfs"
 ROOTFS_TAR="$PROJECT_DIR/rootfs.tar"
+BUSYBOX_APPLETS="sh mount umount cat echo poweroff sync chroot mkdir ls base64"
 
-echo "==> [1/4] 清理旧容器 ($ARCH)..."
+echo "==> [1/6] Cleaning old build..."
 docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
-rm -rf "$ROOTFS_DIR"
-rm -f  "$ROOTFS_TAR"
+rm -rf "$OUTPUT_DIR" "$ROOTFS_TAR"
 
-echo "==> [2/4] 启动构建容器 (debian:13 ${DOCKER_PLATFORM})..."
+echo "==> [2/6] Starting build container (debian:13 ${DOCKER_PLATFORM})..."
 docker run -dit \
   --name "$CONTAINER_NAME" \
   --platform "$DOCKER_PLATFORM" \
   debian:13 bash
 
-echo "==> [3/4] 配置并安装软件..."
+echo "==> [3/6] Installing packages (kernel + busybox + runtimes)..."
 docker exec -i \
   -e DEB_MULTIARCH="$DEB_MULTIARCH" \
   "$CONTAINER_NAME" bash << 'BUILDER_SCRIPT'
 set -euo pipefail
 
-# 先把 ca-certificates 装上，后面全程 HTTPS
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   ca-certificates curl
 
-# 切到 HTTPS 国内镜像源
+# HTTPS mirrors
 rm -f /etc/apt/sources.list.d/debian.sources
 cat > /etc/apt/sources.list << 'APTEOF'
 deb https://mirrors.tuna.tsinghua.edu.cn/debian/ trixie main contrib non-free non-free-firmware
@@ -67,7 +71,9 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   bash-completion \
   pandoc poppler-utils qpdf tesseract-ocr \
   libreoffice-writer libreoffice-impress libreoffice-calc \
-  lua5.4
+  lua5.4 \
+  busybox-static \
+  linux-image-cloud-amd64
 
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
 DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
@@ -159,30 +165,20 @@ DOTINPUTRC
 chown -R tokimo:tokimo /home/tokimo
 
 # =============================================
-# 精简：删除 bwrap 沙箱用不到的东西
+# Slim down
 # =============================================
 
-# Node.js C++ 头文件 (仅编译原生模块需要, 运行时不需要)
 rm -rf /usr/include/node
-
-# Perl 模块文件 (perl-base 是 Essential 保留)
 rm -rf /usr/share/perl /usr/share/perl5 /etc/perl
 
-# PulseAudio 库路径注册 (ffmpeg 依赖 libpulsecommon, 不在标准库路径)
 echo "/usr/lib/${DEB_MULTIARCH}/pulseaudio" > /etc/ld.so.conf.d/pulseaudio.conf
-# LibreOffice 库路径注册
 echo "/usr/lib/libreoffice/program" > /etc/ld.so.conf.d/libreoffice.conf
 ldconfig
 
-# Scalar (Git 大仓库管理工具)
 rm -rf /usr/bin/scalar /usr/share/man/man1/scalar* 2>/dev/null || true
-
-# GPG 附属工具 (保留 gpg 本体)
 apt-get remove -y dirmngr gpgsm 2>/dev/null || true
 
-# Vim 文档/帮助/教程 (保留编辑器本体)
 rm -rf /usr/share/vim/vim*/doc /usr/share/vim/vim*/tutor
-# Vim 语法: 只保留文案工作者常用的 (删掉 180+ 编程语言语法文件)
 find /usr/share/vim/vim*/syntax -type f ! -name 'markdown.vim' ! -name 'text.vim' \
   ! -name 'help.vim' ! -name 'vim.vim' ! -name 'viminfo.vim' \
   ! -name 'sh.vim' ! -name 'bash.vim' ! -name 'python.vim' \
@@ -195,19 +191,14 @@ find /usr/share/vim/vim*/syntax -type f ! -name 'markdown.vim' ! -name 'text.vim
   ! -name 'lua.vim' \
   -delete 2>/dev/null || true
 
-# systemd / init / udev (bwrap 无 init 系统)
 rm -rf /usr/lib/systemd /usr/lib/init /etc/systemd /etc/init.d
 rm -rf /var/lib/systemd /usr/lib/tmpfiles.d /usr/lib/sysctl.d
 rm -rf /usr/lib/udev /etc/udev 2>/dev/null || true
 
-# 桌面相关 (图标/菜单/桌面入口)
 rm -rf /usr/share/icons /usr/share/pixmaps /usr/share/applications
 rm -rf /usr/share/menu /usr/share/polkit-1
-
-# 其他 shell (只用 bash)
 rm -rf /usr/share/fish /usr/share/zsh
 
-# 杂项 share 目录
 rm -rf /usr/share/keyrings /usr/share/gcc /usr/share/libgcrypt20
 rm -rf /usr/share/cmake /usr/share/pkgconfig /usr/share/binfmts
 rm -rf /usr/share/libc-bin /usr/share/readline /usr/share/misc
@@ -216,32 +207,25 @@ rm -rf /usr/share/debianutils /usr/share/base-files /usr/share/base-passwd
 rm -rf /usr/share/gdb /usr/share/gitweb /usr/share/tabset
 rm -rf /usr/share/python-wheels
 
-# PAM (bwrap 单用户, 无登录认证)
 rm -rf /etc/pam.d /etc/pam.conf /etc/security /usr/share/pam*
 rm -rf /var/lib/pam
-
-# etc 杂项 (不影响 apt 的部分)
 rm -rf /etc/cron* /etc/logrotate.d /etc/logcheck /etc/default /etc/skel
-
-# usr/lib 杂项
 rm -rf /usr/lib/lsb /usr/lib/valgrind /usr/lib/mime
 
-# /usr/sbin: 只保留沙箱需要的, 其他全删
-# 保留: ldconfig(库路径), update-ca-certificates(证书), zic(时区), sysctl, iconvconfig
 find /usr/sbin -type f ! -name 'ldconfig' ! -name 'update-ca-certificates' \
   ! -name 'zic' ! -name 'sysctl' ! -name 'iconvconfig' -delete 2>/dev/null || true
 
-# terminfo: 只保留 xterm
 find /usr/share/terminfo -type f ! -path '*/xterm*' -delete 2>/dev/null || true
 find /usr/share/terminfo -type d -empty -delete 2>/dev/null || true
 
-# zoneinfo: 只保留 Asia + UTC + PRC
 find /usr/share/zoneinfo -type f \
   ! -path '*/Asia/*' ! -name 'UTC' ! -name 'PRC' ! -name 'posixrules' \
   -delete 2>/dev/null || true
 find /usr/share/zoneinfo -type d -empty -delete 2>/dev/null || true
 
-# === 原清理步骤 (apt 操作) ===
+# Remove kernel modules (not needed in rootfs)
+find /lib/modules -name '*.ko' -delete 2>/dev/null || true
+rm -rf /lib/modules/*/kernel 2>/dev/null || true
 
 rm -rf \
   /usr/share/man \
@@ -266,22 +250,60 @@ rm -rf \
 find / -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 find / -name '*.pyc' -delete 2>/dev/null || true
 
-echo "--- 验证 ---"
+echo "--- verification ---"
 node --version
 python3 --version
 python --version
 lua -v
 pandoc --version | head -1
-pdftoppm -v 2>&1 | head -1
-qpdf --version 2>&1 | head -1
-dig -v 2>&1 | head -1
-ls /home/tokimo/bin/ | head -15
-ls /home/tokimo/python_packages/ | grep -v dist-info | grep -v __pycache__ | head -20
+busybox | head -1
+ls /boot/ | grep vmlinuz || echo "no kernel in /boot"
 BUILDER_SCRIPT
 
-echo "==> [4/4] 导出 & 解包 rootfs..."
+echo "==> [4/6] Extracting kernel + busybox..."
+mkdir -p "$OUTPUT_DIR"
+
+KERNEL_PATH=$(docker exec "$CONTAINER_NAME" sh -c 'ls /boot/vmlinuz-* 2>/dev/null | head -1')
+if [ -z "$KERNEL_PATH" ]; then
+    echo "ERROR: kernel not found in container"
+    docker rm -f "$CONTAINER_NAME"
+    exit 1
+fi
+echo "    kernel: $KERNEL_PATH"
+
+docker cp "$CONTAINER_NAME:$KERNEL_PATH" "$OUTPUT_DIR/vmlinuz"
+docker cp "$CONTAINER_NAME:/bin/busybox" "$OUTPUT_DIR/busybox"
+chmod +x "$OUTPUT_DIR/busybox"
+
+echo "    vmlinuz: $(du -sh "$OUTPUT_DIR/vmlinuz" | cut -f1)"
+echo "    busybox: $(du -sh "$OUTPUT_DIR/busybox" | cut -f1)"
+
+echo "==> [5/6] Building initrd..."
+INITRD_DIR="$PROJECT_DIR/initrd-${ARCH}"
+rm -rf "$INITRD_DIR"
+mkdir -p "$INITRD_DIR/bin" "$INITRD_DIR/proc" "$INITRD_DIR/sys" "$INITRD_DIR/dev" "$INITRD_DIR/mnt/work" "$INITRD_DIR/tmp" "$INITRD_DIR/sbin"
+
+cp "$OUTPUT_DIR/busybox" "$INITRD_DIR/bin/busybox"
+chmod +x "$INITRD_DIR/bin/busybox"
+
+for applet in $BUSYBOX_APPLETS; do
+    ln -sf busybox "$INITRD_DIR/bin/$applet"
+done
+ln -sf /bin/busybox "$INITRD_DIR/sbin/poweroff"
+ln -sf /bin/busybox "$INITRD_DIR/sbin/init"
+
+cp "$PROJECT_DIR/init.sh" "$INITRD_DIR/init"
+chmod +x "$INITRD_DIR/init"
+
+echo "    packing initrd..."
+( cd "$INITRD_DIR" && find . | cpio -o -H newc 2>/dev/null ) | gzip -9 > "$OUTPUT_DIR/initrd.img"
+
+echo "    initrd.img: $(du -sh "$OUTPUT_DIR/initrd.img" | cut -f1)"
+rm -rf "$INITRD_DIR"
+
+echo "==> [6/6] Exporting rootfs..."
 docker export "$CONTAINER_NAME" -o "$ROOTFS_TAR"
-echo "    rootfs.tar 大小: $(du -sh "$ROOTFS_TAR" | cut -f1)"
+echo "    rootfs.tar: $(du -sh "$ROOTFS_TAR" | cut -f1)"
 
 mkdir -p "$ROOTFS_DIR"
 tar -xpf "$ROOTFS_TAR" \
@@ -292,27 +314,28 @@ tar -xpf "$ROOTFS_TAR" \
   --exclude='./proc/*' \
   --exclude='./sys/*'
 
-echo "--- 最终验证 ---"
-# 用 rootfs 自己的 ld-linux 跑验证，避免宿主机缺库 / QEMU 找不到 ld
-LD_LINUX="$ROOTFS_DIR/lib64/ld-linux-x86-64.so.2"
-[ "$ARCH" = "arm64" ] && LD_LINUX="$ROOTFS_DIR/lib/ld-linux-aarch64.so.1"
-LD_LIB="$ROOTFS_DIR/usr/lib/${DEB_MULTIARCH}:$ROOTFS_DIR/lib/${DEB_MULTIARCH}:$ROOTFS_DIR/usr/lib/libreoffice/program"
+# Remove kernel files from rootfs (already extracted above)
+rm -f "$ROOTFS_DIR"/boot/vmlinuz-* "$ROOTFS_DIR"/boot/initrd.img-* "$ROOTFS_DIR"/boot/System.map-* "$ROOTFS_DIR"/boot/config-* 2>/dev/null || true
 
-"$LD_LINUX" --library-path "$LD_LIB" "$ROOTFS_DIR/usr/bin/node" --version
-"$LD_LINUX" --library-path "$LD_LIB" "$ROOTFS_DIR/usr/bin/python3" --version
-"$LD_LINUX" --library-path "$LD_LIB" "$ROOTFS_DIR/usr/local/bin/python" --version
-"$LD_LINUX" --library-path "$LD_LIB" "$ROOTFS_DIR/usr/local/bin/lua" -v
-echo "Node bins:"
-ls "$ROOTFS_DIR/home/tokimo/bin/" | head -15
-echo "Python packages:"
-ls "$ROOTFS_DIR/home/tokimo/python_packages/" | grep -v dist-info | grep -v __pycache__ | head -20
+# Copy busybox into rootfs for sandbox use
+cp "$OUTPUT_DIR/busybox" "$ROOTFS_DIR/bin/busybox"
+for applet in $BUSYBOX_APPLETS; do
+    [ ! -e "$ROOTFS_DIR/bin/$applet" ] && ln -sf busybox "$ROOTFS_DIR/bin/$applet" || true
+done
 
-echo "==> 清理..."
+echo "--- final ---"
+ls -lh "$OUTPUT_DIR/vmlinuz" "$OUTPUT_DIR/initrd.img"
+echo "rootfs: $(du -sh "$ROOTFS_DIR" | cut -f1)"
+echo "rootfs has busybox: $( [ -f "$ROOTFS_DIR/bin/busybox" ] && echo yes || echo no )"
+
+echo "==> Cleaning up..."
 docker rm -f "$CONTAINER_NAME"
 rm -f "$ROOTFS_TAR"
-rm -f "$PROJECT_DIR/build.sh.bak"
 
 echo ""
-echo "完成! rootfs (${ARCH}) 位于: $ROOTFS_DIR"
-echo "产物大小: $(du -sh "$ROOTFS_DIR" | cut -f1)"
-echo "进入沙箱: bwrap --bind $ROOTFS_DIR / ..."
+echo "Done! Output: $OUTPUT_DIR"
+echo "  vmlinuz    ($(du -sh "$OUTPUT_DIR/vmlinuz" | cut -f1))"
+echo "  initrd.img ($(du -sh "$OUTPUT_DIR/initrd.img" | cut -f1))"
+echo "  rootfs/    ($(du -sh "$ROOTFS_DIR" | cut -f1))"
+echo ""
+echo "Install: bash install.sh ${ARCH}"

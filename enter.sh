@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
-# 进入 TokimoOS rootfs 沙箱
-# 改动直接写入 rootfs/ 目录，exit 后持久化，git commit 保存版本
+# Enter TokimoOS sandbox via bwrap (for testing)
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOTFS_DIR="$PROJECT_DIR/rootfs"
+ROOTFS_DIR="$PROJECT_DIR/tokimo-os-amd64/rootfs"
+
+for d in "$PROJECT_DIR"/tokimo-os-*/rootfs; do
+    [ -d "$d" ] && ROOTFS_DIR="$d" && break
+done
 
 if [ ! -d "$ROOTFS_DIR/usr" ]; then
-  echo "错误: rootfs 不存在，请先运行 bash build.sh"
-  exit 1
+    echo "error: rootfs not found; run bash build.sh first"
+    exit 1
 fi
 
-echo "进入 TokimoOS 沙箱 ... (exit 退出，改动自动保存到 rootfs/)"
+echo "Entering TokimoOS sandbox ... (exit to leave)"
 exec bwrap \
   --bind "$ROOTFS_DIR" / \
   --bind /tmp /tmp \
