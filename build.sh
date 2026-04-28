@@ -45,6 +45,7 @@ docker run -dit \
 echo "==> [3/6] Installing packages (kernel + busybox + runtimes)..."
 docker exec -i \
   -e DEB_MULTIARCH="$DEB_MULTIARCH" \
+  -e KERNEL_PKG="linux-image-cloud-${ARCH}" \
   "$CONTAINER_NAME" bash << 'BUILDER_SCRIPT'
 set -euo pipefail
 
@@ -73,7 +74,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   libreoffice-writer libreoffice-impress libreoffice-calc \
   lua5.4 \
   busybox-static \
-  linux-image-cloud-amd64
+  $KERNEL_PKG
 
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
 DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
