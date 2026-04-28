@@ -317,6 +317,8 @@ tar -xpf "$ROOTFS_TAR" \
 
 # Remove kernel files from rootfs (already extracted above)
 rm -f "$ROOTFS_DIR"/boot/vmlinuz-* "$ROOTFS_DIR"/boot/initrd.img-* "$ROOTFS_DIR"/boot/System.map-* "$ROOTFS_DIR"/boot/config-* 2>/dev/null || true
+# Remove root-level symlinks created by kernel package post-install
+rm -f "$ROOTFS_DIR"/vmlinuz "$ROOTFS_DIR"/vmlinuz.old "$ROOTFS_DIR"/initrd.img "$ROOTFS_DIR"/initrd.img.old 2>/dev/null || true
 
 # Copy busybox into rootfs for sandbox use
 cp "$OUTPUT_DIR/busybox" "$ROOTFS_DIR/bin/busybox"
