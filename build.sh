@@ -257,7 +257,7 @@ python3 --version
 python --version
 lua -v
 pandoc --version | head -1
-busybox | head -1
+busybox 2>&1 | head -1 || true
 ls /boot/ | grep vmlinuz || echo "no kernel in /boot"
 BUILDER_SCRIPT
 
