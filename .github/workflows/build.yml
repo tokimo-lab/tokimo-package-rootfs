@@ -30,17 +30,19 @@ jobs:
       - name: Build TokimoOS (${{ matrix.arch }})
         run: bash build.sh ${{ matrix.arch }}
 
-      - name: Compress rootfs
+      - name: Package rootfs tarball
         run: |
-          tar -cpf rootfs.tar -C tokimo-os-${{ matrix.arch }}/rootfs .
-          zstd -10 -T0 rootfs.tar -o rootfs-${{ matrix.arch }}.tar.zst
-          sha256sum rootfs-${{ matrix.arch }}.tar.zst > sha256sum-rootfs-${{ matrix.arch }}.txt
+          tar -cpf tokimo-${{ matrix.arch }}-rootfs.tar -C tokimo-os-${{ matrix.arch }}/rootfs .
+          zstd -10 -T0 tokimo-${{ matrix.arch }}-rootfs.tar -o tokimo-${{ matrix.arch }}-rootfs.tar.zst
+          sha256sum tokimo-${{ matrix.arch }}-rootfs.tar.zst > sha256sum-tokimo-${{ matrix.arch }}-rootfs.txt
+          rm tokimo-${{ matrix.arch }}-rootfs.tar
 
-      - name: Package tokimo-os bundle (kernel + initrd)
+      - name: Package boot bundle (kernel + initrd)
         run: |
-          tar -cpf tokimo-os-${{ matrix.arch }}.tar -C tokimo-os-${{ matrix.arch }} vmlinuz initrd.img
-          zstd -5 -T0 tokimo-os-${{ matrix.arch }}.tar -o tokimo-os-${{ matrix.arch }}.tar.zst
-          sha256sum tokimo-os-${{ matrix.arch }}.tar.zst > sha256sum-tokimo-os-${{ matrix.arch }}.txt
+          tar -cpf tokimo-${{ matrix.arch }}-boot.tar -C tokimo-os-${{ matrix.arch }} vmlinuz initrd.img
+          zstd -5 -T0 tokimo-${{ matrix.arch }}-boot.tar -o tokimo-${{ matrix.arch }}-boot.tar.zst
+          sha256sum tokimo-${{ matrix.arch }}-boot.tar.zst > sha256sum-tokimo-${{ matrix.arch }}-boot.txt
+          rm tokimo-${{ matrix.arch }}-boot.tar
 
       - name: Create VHDX disk image (Windows HCS)
         run: |
@@ -51,46 +53,46 @@ jobs:
 
           sudo apt-get update -qq && sudo apt-get install -y -qq qemu-utils zip
 
-          qemu-img create -f raw rootfs-${{ matrix.arch }}.img ${IMG_SIZE}M
-          mkfs.ext4 -F rootfs-${{ matrix.arch }}.img
+          qemu-img create -f raw rootfs.img ${IMG_SIZE}M
+          mkfs.ext4 -F rootfs.img
 
           mkdir -p /tmp/rootfs-mnt
-          sudo mount -o loop rootfs-${{ matrix.arch }}.img /tmp/rootfs-mnt
+          sudo mount -o loop rootfs.img /tmp/rootfs-mnt
           sudo cp -a "$ROOTFS_DIR"/. /tmp/rootfs-mnt/
           sudo umount /tmp/rootfs-mnt
 
-          qemu-img convert -f raw -O vhdx -o subformat=dynamic rootfs-${{ matrix.arch }}.img rootfs-${{ matrix.arch }}.vhdx
-          echo "vhdx size: $(du -sh rootfs-${{ matrix.arch }}.vhdx | cut -f1)"
+          qemu-img convert -f raw -O vhdx -o subformat=dynamic rootfs.img rootfs.vhdx
+          echo "vhdx size: $(du -sh rootfs.vhdx | cut -f1)"
 
-          zip -9 rootfs-${{ matrix.arch }}.vhdx.zip rootfs-${{ matrix.arch }}.vhdx
-          sha256sum rootfs-${{ matrix.arch }}.vhdx.zip > sha256sum-rootfs-vhdx-${{ matrix.arch }}.txt
-          echo "zipped size: $(du -sh rootfs-${{ matrix.arch }}.vhdx.zip | cut -f1)"
+          zip -9 tokimo-${{ matrix.arch }}-ext4-rootfs.vhdx.zip rootfs.vhdx
+          sha256sum tokimo-${{ matrix.arch }}-ext4-rootfs.vhdx.zip > sha256sum-tokimo-${{ matrix.arch }}-ext4-rootfs.txt
+          echo "zipped size: $(du -sh tokimo-${{ matrix.arch }}-ext4-rootfs.vhdx.zip | cut -f1)"
 
-          rm rootfs-${{ matrix.arch }}.img rootfs-${{ matrix.arch }}.vhdx
+          rm rootfs.img rootfs.vhdx
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tokimo-os-${{ matrix.arch }}
+          name: tokimo-${{ matrix.arch }}
           path: |
-            tokimo-os-${{ matrix.arch }}.tar.zst
-            rootfs-${{ matrix.arch }}.tar.zst
-            rootfs-${{ matrix.arch }}.vhdx.zip
-            sha256sum-tokimo-os-${{ matrix.arch }}.txt
-            sha256sum-rootfs-${{ matrix.arch }}.txt
-            sha256sum-rootfs-vhdx-${{ matrix.arch }}.txt
+            tokimo-${{ matrix.arch }}-boot.tar.zst
+            tokimo-${{ matrix.arch }}-rootfs.tar.zst
+            tokimo-${{ matrix.arch }}-ext4-rootfs.vhdx.zip
+            sha256sum-tokimo-${{ matrix.arch }}-boot.txt
+            sha256sum-tokimo-${{ matrix.arch }}-rootfs.txt
+            sha256sum-tokimo-${{ matrix.arch }}-ext4-rootfs.txt
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            tokimo-os-${{ matrix.arch }}.tar.zst
-            rootfs-${{ matrix.arch }}.tar.zst
-            rootfs-${{ matrix.arch }}.vhdx.zip
-            sha256sum-tokimo-os-${{ matrix.arch }}.txt
-            sha256sum-rootfs-${{ matrix.arch }}.txt
-            sha256sum-rootfs-vhdx-${{ matrix.arch }}.txt
+            tokimo-${{ matrix.arch }}-boot.tar.zst
+            tokimo-${{ matrix.arch }}-rootfs.tar.zst
+            tokimo-${{ matrix.arch }}-ext4-rootfs.vhdx.zip
+            sha256sum-tokimo-${{ matrix.arch }}-boot.txt
+            sha256sum-tokimo-${{ matrix.arch }}-rootfs.txt
+            sha256sum-tokimo-${{ matrix.arch }}-ext4-rootfs.txt
           body: |
             TokimoOS ${{ github.ref_name }}
 
@@ -98,35 +100,33 @@ jobs:
 
             | File | Contents |
             |------|----------|
-            | `tokimo-os-{arch}.tar.zst` | Linux kernel + initrd (for macOS VZ / Windows HCS) |
-            | `rootfs-{arch}.tar.zst` | Debian 13 rootfs (for bwrap sandbox / VM chroot) |
-            | `rootfs-{arch}.vhdx.zip` | Debian 13 rootfs as ext4 VHDX, zipped (for Windows HCS) |
+            | `tokimo-{arch}-boot.tar.zst` | Linux kernel + initrd boot payload |
+            | `tokimo-{arch}-rootfs.tar.zst` | Debian 13 rootfs tarball |
+            | `tokimo-{arch}-ext4-rootfs.vhdx.zip` | Debian 13 rootfs as ext4 VHDX (Windows HCS) |
 
             ## Architecture
 
             | File | Arch |
             |------|------|
-            | `tokimo-os-amd64.tar.zst` | x86_64 / Intel Mac / Windows x64 |
-            | `tokimo-os-arm64.tar.zst` | aarch64 / Apple Silicon |
-            | `rootfs-amd64.vhdx.zip` | x86_64 / Windows x64 |
-            | `rootfs-arm64.vhdx.zip` | aarch64 / Windows ARM64 |
+            | `tokimo-amd64-*` | x86_64 / Intel Mac / Windows x64 |
+            | `tokimo-arm64-*` | aarch64 / Apple Silicon / Windows ARM64 |
 
             ## Quick start
 
             ```bash
-            # Download kernel + initrd bundle
-            curl -LO ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}/tokimo-os-amd64.tar.zst
-            zstd -d tokimo-os-amd64.tar.zst
-            tar -xpf tokimo-os-amd64.tar -C ~/.tokimo/
+            # Download boot bundle (kernel + initrd)
+            curl -LO ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}/tokimo-amd64-boot.tar.zst
+            zstd -d tokimo-amd64-boot.tar.zst
+            tar -xpf tokimo-amd64-boot.tar -C ~/.tokimo/
 
-            # Download rootfs (tar.zst)
-            curl -LO ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}/rootfs-amd64.tar.zst
-            zstd -d rootfs-amd64.tar.zst
+            # Download rootfs tarball
+            curl -LO ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}/tokimo-amd64-rootfs.tar.zst
+            zstd -d tokimo-amd64-rootfs.tar.zst
             mkdir -p ~/.tokimo/rootfs
-            tar -xpf rootfs-amd64.tar -C ~/.tokimo/rootfs
+            tar -xpf tokimo-amd64-rootfs.tar -C ~/.tokimo/rootfs
 
             # Or download rootfs VHDX (for Windows HCS)
-            curl -LO ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}/rootfs-amd64.vhdx.zip
-            unzip rootfs-amd64.vhdx.zip
+            curl -LO ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}/tokimo-amd64-ext4-rootfs.vhdx.zip
+            unzip tokimo-amd64-ext4-rootfs.vhdx.zip
             ```
           make_latest: true
