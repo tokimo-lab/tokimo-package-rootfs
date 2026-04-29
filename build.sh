@@ -30,7 +30,7 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="$PROJECT_DIR/tokimo-os-${ARCH}"
 ROOTFS_DIR="$OUTPUT_DIR/rootfs"
 ROOTFS_TAR="$PROJECT_DIR/rootfs.tar"
-BUSYBOX_APPLETS="sh mount umount cat echo poweroff sync chroot mkdir ls base64"
+BUSYBOX_APPLETS="sh mount umount cat echo poweroff sync chroot mkdir ls base64 insmod"
 
 echo "==> [1/6] Cleaning old build..."
 docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
@@ -45,7 +45,7 @@ docker run -dit \
 echo "==> [3/6] Installing packages (kernel + busybox + runtimes)..."
 docker exec -i \
   -e DEB_MULTIARCH="$DEB_MULTIARCH" \
-  -e KERNEL_PKG="linux-image-cloud-${ARCH}" \
+  -e KERNEL_PKG="linux-image-${ARCH}" \
   "$CONTAINER_NAME" bash << 'BUILDER_SCRIPT'
 set -euo pipefail
 
@@ -74,6 +74,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   libreoffice-writer libreoffice-impress libreoffice-calc \
   lua5.4 \
   busybox-static \
+  gcc libc6-dev \
   $KERNEL_PKG
 
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
@@ -295,6 +296,42 @@ ln -sf /bin/busybox "$INITRD_DIR/sbin/init"
 
 cp "$PROJECT_DIR/init.sh" "$INITRD_DIR/init"
 chmod +x "$INITRD_DIR/init"
+
+# --- vsock support for Windows HCS ---
+# HCS exposes Plan9 shares via vsock (Hyper-V sockets), not virtio devices.
+# The Debian *generic* (linux-image-amd64) kernel ships hv_vmbus / vsock /
+# hv_sock as loadable modules — init.sh insmods them at boot. The cloud
+# kernel is too stripped down (no vsock at all). We bundle the modules
+# along with vsock9p into the initrd.
+
+echo "    compiling vsock9p static helper..."
+docker cp "$PROJECT_DIR/vsock9p.c" "$CONTAINER_NAME:/tmp/vsock9p.c"
+docker exec "$CONTAINER_NAME" gcc -static -O2 -o /tmp/vsock9p /tmp/vsock9p.c
+docker cp "$CONTAINER_NAME:/tmp/vsock9p" "$INITRD_DIR/bin/vsock9p"
+chmod +x "$INITRD_DIR/bin/vsock9p"
+echo "    vsock9p: $(du -sh "$INITRD_DIR/bin/vsock9p" | cut -f1)"
+
+echo "    bundling kernel modules (Hyper-V vsock + 9p stack)..."
+KMODS_HOST="$INITRD_DIR/modules"
+mkdir -p "$KMODS_HOST"
+KVER=$(docker exec "$CONTAINER_NAME" sh -c 'ls /lib/modules | head -1')
+KWANT='hv_vmbus|hv_utils|vsock\.ko|hv_sock|9pnet|9p\.ko|netfs|fuse'
+docker exec "$CONTAINER_NAME" sh -c "
+    set -e
+    mkdir -p /tmp/kmods
+    find /lib/modules/$KVER -name '*.ko*' \
+        | grep -E '$KWANT' \
+        | while read m; do
+            base=\$(basename \$m)
+            case \$base in
+                *.ko.xz) xz -d -c \$m > /tmp/kmods/\${base%.xz} ;;
+                *.ko)    cp \$m /tmp/kmods/\$base ;;
+            esac
+        done
+    ls /tmp/kmods | wc -l
+"
+docker cp "$CONTAINER_NAME:/tmp/kmods/." "$KMODS_HOST/"
+echo "    modules: $(ls "$KMODS_HOST" | wc -l) files"
 
 echo "    packing initrd..."
 ( cd "$INITRD_DIR" && find . | cpio -o -H newc 2>/dev/null ) | gzip -9 > "$OUTPUT_DIR/initrd.img"
