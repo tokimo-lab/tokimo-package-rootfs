@@ -244,7 +244,7 @@ find /usr/share/zoneinfo -type f \
 find /usr/share/zoneinfo -type d -empty -delete 2>/dev/null || true
 
 # Stage kernel modules (initrd needs them) BEFORE removing them from rootfs.
-# The module-bundle step on the host does `docker cp /tmp/kmods/.` out.
+# The module-bundle step on the host does `docker cp /var/cache/tokimo-kmods/.` out.
 KVER_INNER=$(ls /lib/modules | head -1)
 KMOD_LIST='hv_vmbus hv_utils vsock hv_sock scsi_common scsi_mod scsi_transport_fc hv_storvsc sd_mod netfs 9pnet 9pnet_fd 9p crc16 crc32c_generic libcrc32c jbd2 mbcache ext4'
 resolve_deps() {
@@ -264,18 +264,18 @@ resolve_deps() {
 }
 ALL_MODS=''
 for m in $KMOD_LIST; do ALL_MODS=$(resolve_deps "$m" "$ALL_MODS"); done
-mkdir -p /tmp/kmods
+mkdir -p /var/cache/tokimo-kmods
 for m in $ALL_MODS; do
     f=$(modinfo -F filename -k "$KVER_INNER" "$m" 2>/dev/null || true)
     [ -z "$f" ] && continue
     [ ! -f "$f" ] && continue
     base=$(basename "$f")
     case "$base" in
-        *.ko.xz) xz -d -c "$f" > /tmp/kmods/${base%.xz} ;;
-        *.ko)    cp "$f" /tmp/kmods/$base ;;
+        *.ko.xz) xz -d -c "$f" > /var/cache/tokimo-kmods/${base%.xz} ;;
+        *.ko)    cp "$f" /var/cache/tokimo-kmods/$base ;;
     esac
 done
-echo "    staged $(ls /tmp/kmods | wc -l) kernel modules to /tmp/kmods"
+echo "    staged $(ls /var/cache/tokimo-kmods | wc -l) kernel modules to /var/cache/tokimo-kmods"
 
 # Remove kernel modules from rootfs (saves space; initrd has copies)
 find /lib/modules -name '*.ko*' -delete 2>/dev/null || true
@@ -366,7 +366,7 @@ echo "    vsock9p: $(du -sh "$INITRD_DIR/bin/vsock9p" | cut -f1)"
 echo "    bundling kernel modules (Hyper-V vsock + SCSI + 9p + ext4 + deps)..."
 KMODS_HOST="$INITRD_DIR/modules"
 mkdir -p "$KMODS_HOST"
-docker cp "$CONTAINER_NAME:/tmp/kmods/." "$KMODS_HOST/"
+docker cp "$CONTAINER_NAME:/var/cache/tokimo-kmods/." "$KMODS_HOST/"
 echo "    modules: $(ls "$KMODS_HOST" | wc -l) files"
 
 # --- bake tokimo-sandbox-init (Rust musl static) into initrd if provided ---
