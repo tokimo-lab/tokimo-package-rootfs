@@ -27,7 +27,38 @@ jobs:
       - name: Set up QEMU (for cross-platform build)
         uses: docker/setup-qemu-action@v3
 
+      - name: Checkout tokimo-package-sandbox (for tokimo-sandbox-init source)
+        uses: actions/checkout@v4
+        with:
+          repository: tokimo-lab/tokimo-package-sandbox
+          path: _sandbox
+
+      - name: Build tokimo-sandbox-init (musl static, in-container ${{ matrix.arch }})
+        run: |
+          case "${{ matrix.arch }}" in
+            amd64) DOCKER_PLATFORM=linux/amd64; RUST_TARGET=x86_64-unknown-linux-musl ;;
+            arm64) DOCKER_PLATFORM=linux/arm64; RUST_TARGET=aarch64-unknown-linux-musl ;;
+          esac
+          docker run --rm --platform "$DOCKER_PLATFORM" \
+            -v "$PWD/_sandbox:/src" \
+            -w /src \
+            rust:1.95-slim-bookworm bash -c "
+              set -e
+              apt-get update -qq
+              apt-get install -y -qq musl-tools
+              rustup target add $RUST_TARGET
+              cargo build --release --target $RUST_TARGET --bin tokimo-sandbox-init
+              cp target/$RUST_TARGET/release/tokimo-sandbox-init /src/tokimo-sandbox-init
+              chmod +x /src/tokimo-sandbox-init
+            "
+          mv _sandbox/tokimo-sandbox-init ./tokimo-sandbox-init
+          file ./tokimo-sandbox-init
+          ls -lh ./tokimo-sandbox-init
+          echo "TOKIMO_INIT_BIN=$PWD/tokimo-sandbox-init" >> "$GITHUB_ENV"
+
       - name: Build TokimoOS (${{ matrix.arch }})
+        env:
+          TOKIMO_INIT_BIN: ${{ env.TOKIMO_INIT_BIN }}
         run: bash build.sh ${{ matrix.arch }}
 
       - name: Package rootfs tarball

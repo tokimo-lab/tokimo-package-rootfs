@@ -26,16 +26,20 @@ echo "tokimo-init: cmdline=$CMDLINE" >/dev/kmsg 2>/dev/null || true
 CMD_B64=""
 ROOTSHARE_PORT=""
 WORK_PORT=""
+SESSION_MODE=0
+INIT_PORT=50003
 for arg in $CMDLINE; do
     case "$arg" in
         run=*)                       CMD_B64="${arg#run=}" ;;
         tokimo.rootshare_port=*)     ROOTSHARE_PORT="${arg#tokimo.rootshare_port=}" ;;
         tokimo.work_port=*)          WORK_PORT="${arg#tokimo.work_port=}" ;;
+        tokimo.session=1)            SESSION_MODE=1 ;;
+        tokimo.init_port=*)          INIT_PORT="${arg#tokimo.init_port=}" ;;
     esac
 done
 
-if [ -z "$CMD_B64" ]; then
-    echo "tokimo-init: missing run=" >/dev/kmsg 2>/dev/null || true
+if [ "$SESSION_MODE" = 0 ] && [ -z "$CMD_B64" ]; then
+    echo "tokimo-init: missing run= and not session mode" >/dev/kmsg 2>/dev/null || true
     /bin/busybox poweroff -f
 fi
 
@@ -62,11 +66,21 @@ if [ -d /modules ]; then
     # vsock core then hv_sock transport.
     load_mod vsock
     load_mod hv_sock
+    # SCSI stack (for VHDX boot disk).
+    load_mod scsi_mod
+    load_mod hv_storvsc
+    load_mod sd_mod
     # 9p stack (9p needs netfs since 6.x).
     load_mod netfs
     load_mod 9pnet
     load_mod 9pnet_fd
     load_mod 9p
+    # ext4 filesystem (for SCSI rootfs).
+    load_mod crc32c_generic
+    load_mod libcrc32c
+    load_mod jbd2
+    load_mod mbcache
+    load_mod ext4
     echo "tokimo-init: modules loaded" >/dev/kmsg 2>/dev/null || true
 fi
 
@@ -82,6 +96,35 @@ if /bin/busybox mount -t virtiofs work /newroot 2>/dev/null; then
     /bin/busybox mkdir -p /newroot/mnt/work
     /bin/busybox mount --bind /newroot /newroot/mnt/work 2>/dev/null || true
     MOUNTED_ROOT=1
+fi
+
+# Windows HCS path: SCSI VHDX boot disk (cowork-style).
+# If the kernel cmdline says root=/dev/sda and the device exists, mount it.
+ROOT_DEVICE=""
+for arg in $CMDLINE; do
+    case "$arg" in
+        root=/dev/*) ROOT_DEVICE="${arg#root=}" ;;
+    esac
+done
+if [ "$MOUNTED_ROOT" = 0 ] && [ -n "$ROOT_DEVICE" ] && [ -b "$ROOT_DEVICE" ]; then
+    ROOTFSTYPE="ext4"
+    for arg in $CMDLINE; do
+        case "$arg" in
+            rootfstype=*) ROOTFSTYPE="${arg#rootfstype=}" ;;
+        esac
+    done
+    if /bin/busybox mount -t "$ROOTFSTYPE" -o rw "$ROOT_DEVICE" /newroot 2>/dev/null; then
+        echo "tokimo-init: SCSI rootfs mounted from $ROOT_DEVICE ($ROOTFSTYPE)" >/dev/kmsg 2>/dev/null || true
+        /bin/busybox mkdir -p /newroot/mnt/work
+        # Mount work share if port is available.
+        if [ -n "$WORK_PORT" ] && [ -x /bin/vsock9p ]; then
+            /bin/busybox mkdir -p /newroot/mnt/work
+            /bin/vsock9p /newroot/mnt/work "$WORK_PORT" work 2>/dev/null || true
+        fi
+        MOUNTED_ROOT=1
+    else
+        echo "tokimo-init: SCSI mount $ROOT_DEVICE failed" >/dev/kmsg 2>/dev/null || true
+    fi
 fi
 
 # Windows HCS path: two Plan9-over-vsock shares.
@@ -123,6 +166,38 @@ fi
 # ---------------------------------------------------------------------------
 # Decode and run the command inside the rootfs (chrooted).
 # ---------------------------------------------------------------------------
+
+# Bind /run as tmpfs inside the rootfs so the init binary can create
+# /run/tk-sandbox/control.sock if it falls back to that path.
+/bin/busybox mkdir -p /newroot/run/tk-sandbox 2>/dev/null || true
+
+if [ "$SESSION_MODE" = 1 ]; then
+    echo "tokimo-init: SESSION mode — exec'ing tokimo-sandbox-init under chroot" >/dev/kmsg 2>/dev/null || true
+
+    # Always copy a fresh tokimo-sandbox-init from initramfs into the rootfs
+    # so a stale binary doesn't get reused across builds.
+    if [ -x /bin/tokimo-sandbox-init ]; then
+        /bin/busybox cp /bin/tokimo-sandbox-init /newroot/bin/tokimo-sandbox-init
+        /bin/busybox chmod +x /newroot/bin/tokimo-sandbox-init
+    elif [ ! -x /newroot/bin/tokimo-sandbox-init ]; then
+        echo "tokimo-init: tokimo-sandbox-init missing in initramfs and rootfs" >/dev/kmsg 2>/dev/null || true
+        /bin/busybox poweroff -f
+    fi
+
+    # The init binary listens on AF_VSOCK port $INIT_PORT for the
+    # host-side service to connect via AF_HYPERV. Kernel console is on
+    # /dev/ttyS1 (COM2) for diagnostics; ttyS0 is unused.
+    #
+    # We use `exec` so init.sh's PID 1 is replaced by chroot → init
+    # binary. The init binary expects to be PID 1 (it checks getpid()==1),
+    # which works because chroot is the same PID via exec chain.
+    export TOKIMO_SANDBOX_VSOCK_PORT="$INIT_PORT"
+    export TOKIMO_SANDBOX_PRE_CHROOTED=1
+    exec /bin/busybox chroot /newroot /bin/tokimo-sandbox-init </dev/null >/dev/null 2>/dev/kmsg
+    # If exec returns, something went wrong.
+    echo "tokimo-init: chroot exec failed" >/dev/kmsg 2>/dev/null || true
+    /bin/busybox poweroff -f
+fi
 
 CMD=$(echo "$CMD_B64" | /bin/busybox base64 -d 2>/dev/null || echo "$CMD_B64")
 echo "tokimo-init: exec: $CMD" >/dev/kmsg 2>/dev/null || true

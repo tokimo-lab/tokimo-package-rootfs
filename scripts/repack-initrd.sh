@@ -45,6 +45,19 @@ echo "==> installing init script"
 cp "$ROOTFS_PROJ/init.sh" "$PREP/init"
 chmod +x "$PREP/init"
 
+# Bundle the static-musl tokimo-sandbox-init binary so init.sh can exec
+# into it for session mode. Built via: cross build --target
+# x86_64-unknown-linux-musl --bin tokimo-sandbox-init --release  (run on
+# the Windows host).
+SANDBOX_INIT_BIN="${SANDBOX_INIT_BIN:-/mnt/f/tokimo-package-sandbox/target/x86_64-unknown-linux-musl/release/tokimo-sandbox-init}"
+if [ -x "$SANDBOX_INIT_BIN" ]; then
+    cp "$SANDBOX_INIT_BIN" "$PREP/bin/tokimo-sandbox-init"
+    chmod +x "$PREP/bin/tokimo-sandbox-init"
+    echo "==>   bundled tokimo-sandbox-init ($(stat -c%s "$PREP/bin/tokimo-sandbox-init") bytes)"
+else
+    echo "==>   WARNING: $SANDBOX_INIT_BIN missing — session mode will be unavailable"
+fi
+
 # Copy kernel modules (decompress .ko.xz so busybox insmod can load them).
 echo "==> copying kernel modules from $GENKERN/modules"
 rm -rf "$PREP/modules"

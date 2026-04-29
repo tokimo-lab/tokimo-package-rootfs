@@ -30,7 +30,13 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="$PROJECT_DIR/tokimo-os-${ARCH}"
 ROOTFS_DIR="$OUTPUT_DIR/rootfs"
 ROOTFS_TAR="$PROJECT_DIR/rootfs.tar"
-BUSYBOX_APPLETS="sh mount umount cat echo poweroff sync chroot mkdir ls base64 insmod"
+BUSYBOX_APPLETS="sh mount umount cat echo poweroff sync chroot mkdir ls base64 insmod cp chmod"
+
+# Optional: path to a prebuilt static `tokimo-sandbox-init` (musl) that
+# will be baked into the initrd at /bin/tokimo-sandbox-init. The init.sh
+# expects this binary in session-mode (Windows HCS). If unset, the boot
+# bundle will be one-shot capable only.
+TOKIMO_INIT_BIN="${TOKIMO_INIT_BIN:-}"
 
 echo "==> [1/6] Cleaning old build..."
 docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
@@ -332,6 +338,20 @@ docker exec "$CONTAINER_NAME" sh -c "
 "
 docker cp "$CONTAINER_NAME:/tmp/kmods/." "$KMODS_HOST/"
 echo "    modules: $(ls "$KMODS_HOST" | wc -l) files"
+
+# --- bake tokimo-sandbox-init (Rust musl static) into initrd if provided ---
+if [ -n "$TOKIMO_INIT_BIN" ] && [ -f "$TOKIMO_INIT_BIN" ]; then
+    echo "    embedding tokimo-sandbox-init: $TOKIMO_INIT_BIN ($(du -sh "$TOKIMO_INIT_BIN" | cut -f1))"
+    cp "$TOKIMO_INIT_BIN" "$INITRD_DIR/bin/tokimo-sandbox-init"
+    chmod +x "$INITRD_DIR/bin/tokimo-sandbox-init"
+elif [ -f "$PROJECT_DIR/initrd-prep/tokimo-sandbox-init" ]; then
+    echo "    embedding tokimo-sandbox-init from initrd-prep/"
+    cp "$PROJECT_DIR/initrd-prep/tokimo-sandbox-init" "$INITRD_DIR/bin/tokimo-sandbox-init"
+    chmod +x "$INITRD_DIR/bin/tokimo-sandbox-init"
+else
+    echo "    NOTE: tokimo-sandbox-init not provided; session-mode bundles will not work."
+    echo "    Set TOKIMO_INIT_BIN=/path/to/tokimo-sandbox-init or place it at initrd-prep/."
+fi
 
 echo "    packing initrd..."
 ( cd "$INITRD_DIR" && find . | cpio -o -H newc 2>/dev/null ) | gzip -9 > "$OUTPUT_DIR/initrd.img"
