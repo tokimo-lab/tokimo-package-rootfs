@@ -243,8 +243,42 @@ find /usr/share/zoneinfo -type f \
   -delete 2>/dev/null || true
 find /usr/share/zoneinfo -type d -empty -delete 2>/dev/null || true
 
-# Remove kernel modules (not needed in rootfs)
-find /lib/modules -name '*.ko' -delete 2>/dev/null || true
+# Stage kernel modules (initrd needs them) BEFORE removing them from rootfs.
+# The module-bundle step on the host does `docker cp /tmp/kmods/.` out.
+KVER_INNER=$(ls /lib/modules | head -1)
+KMOD_LIST='hv_vmbus hv_utils vsock hv_sock scsi_common scsi_mod scsi_transport_fc hv_storvsc sd_mod netfs 9pnet 9pnet_fd 9p crc16 crc32c_generic libcrc32c jbd2 mbcache ext4'
+resolve_deps() {
+    local mod="$1" seen="$2"
+    case " $seen " in *" $mod "*) echo "$seen"; return 0;; esac
+    seen="$seen $mod"
+    local depline
+    depline=$(modinfo -F depends -k "$KVER_INNER" "$mod" 2>/dev/null || true)
+    if [ -n "$depline" ]; then
+        local IFS=','
+        for d in $depline; do
+            [ -z "$d" ] && continue
+            seen=$(resolve_deps "$d" "$seen")
+        done
+    fi
+    echo "$seen"
+}
+ALL_MODS=''
+for m in $KMOD_LIST; do ALL_MODS=$(resolve_deps "$m" "$ALL_MODS"); done
+mkdir -p /tmp/kmods
+for m in $ALL_MODS; do
+    f=$(modinfo -F filename -k "$KVER_INNER" "$m" 2>/dev/null || true)
+    [ -z "$f" ] && continue
+    [ ! -f "$f" ] && continue
+    base=$(basename "$f")
+    case "$base" in
+        *.ko.xz) xz -d -c "$f" > /tmp/kmods/${base%.xz} ;;
+        *.ko)    cp "$f" /tmp/kmods/$base ;;
+    esac
+done
+echo "    staged $(ls /tmp/kmods | wc -l) kernel modules to /tmp/kmods"
+
+# Remove kernel modules from rootfs (saves space; initrd has copies)
+find /lib/modules -name '*.ko*' -delete 2>/dev/null || true
 rm -rf /lib/modules/*/kernel 2>/dev/null || true
 
 rm -rf \
@@ -332,43 +366,6 @@ echo "    vsock9p: $(du -sh "$INITRD_DIR/bin/vsock9p" | cut -f1)"
 echo "    bundling kernel modules (Hyper-V vsock + SCSI + 9p + ext4 + deps)..."
 KMODS_HOST="$INITRD_DIR/modules"
 mkdir -p "$KMODS_HOST"
-KVER=$(docker exec "$CONTAINER_NAME" sh -c 'ls /lib/modules | head -1')
-# Resolve transitive module dependencies via `modinfo -F depends` so we
-# never miss a symbol provider (e.g. scsi_common, scsi_transport_fc, crc16).
-docker exec "$CONTAINER_NAME" bash -c "
-    set -euo pipefail
-    KVER='$KVER'
-    KMOD_LIST='hv_vmbus hv_utils vsock hv_sock scsi_common scsi_mod hv_storvsc sd_mod netfs 9pnet 9pnet_fd 9p crc16 crc32c_generic libcrc32c jbd2 mbcache ext4'
-    resolve_deps() {
-        local mod=\"\$1\" seen=\"\$2\"
-        case \" \$seen \" in *\" \$mod \"*) echo \"\$seen\"; return 0;; esac
-        seen=\"\$seen \$mod\"
-        local depline
-        depline=\$(modinfo -F depends -k \"\$KVER\" \"\$mod\" 2>/dev/null || true)
-        if [ -n \"\$depline\" ]; then
-            local IFS=','
-            for d in \$depline; do
-                [ -z \"\$d\" ] && continue
-                seen=\$(resolve_deps \"\$d\" \"\$seen\")
-            done
-        fi
-        echo \"\$seen\"
-    }
-    ALL=''
-    for m in \$KMOD_LIST; do ALL=\$(resolve_deps \"\$m\" \"\$ALL\"); done
-    mkdir -p /tmp/kmods
-    for m in \$ALL; do
-        f=\$(modinfo -F filename -k \"\$KVER\" \"\$m\" 2>/dev/null || true)
-        [ -z \"\$f\" ] && continue
-        [ ! -f \"\$f\" ] && continue
-        base=\$(basename \"\$f\")
-        case \"\$base\" in
-            *.ko.xz) xz -d -c \"\$f\" > /tmp/kmods/\${base%.xz} ;;
-            *.ko)    cp \"\$f\" /tmp/kmods/\$base ;;
-        esac
-    done
-    ls /tmp/kmods | wc -l
-"
 docker cp "$CONTAINER_NAME:/tmp/kmods/." "$KMODS_HOST/"
 echo "    modules: $(ls "$KMODS_HOST" | wc -l) files"
 
