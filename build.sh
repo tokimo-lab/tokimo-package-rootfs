@@ -81,6 +81,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   lua5.4 \
   busybox-static \
   gcc libc6-dev \
+  kmod \
   $KERNEL_PKG
 
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
@@ -317,23 +318,44 @@ docker cp "$CONTAINER_NAME:/tmp/vsock9p" "$INITRD_DIR/bin/vsock9p"
 chmod +x "$INITRD_DIR/bin/vsock9p"
 echo "    vsock9p: $(du -sh "$INITRD_DIR/bin/vsock9p" | cut -f1)"
 
-echo "    bundling kernel modules (Hyper-V vsock + 9p stack)..."
+echo "    bundling kernel modules (Hyper-V vsock + SCSI + 9p + ext4 + deps)..."
 KMODS_HOST="$INITRD_DIR/modules"
 mkdir -p "$KMODS_HOST"
 KVER=$(docker exec "$CONTAINER_NAME" sh -c 'ls /lib/modules | head -1')
-KWANT='hv_vmbus|hv_utils|vsock\.ko|hv_sock|9pnet|9p\.ko|netfs|fuse'
-docker exec "$CONTAINER_NAME" sh -c "
-    set -e
+# Resolve transitive module dependencies via `modinfo -F depends` so we
+# never miss a symbol provider (e.g. scsi_common, scsi_transport_fc, crc16).
+docker exec "$CONTAINER_NAME" bash -c "
+    set -euo pipefail
+    KVER='$KVER'
+    KMOD_LIST='hv_vmbus hv_utils vsock hv_sock scsi_common scsi_mod hv_storvsc sd_mod netfs 9pnet 9pnet_fd 9p crc16 crc32c_generic libcrc32c jbd2 mbcache ext4'
+    resolve_deps() {
+        local mod=\"\$1\" seen=\"\$2\"
+        case \" \$seen \" in *\" \$mod \"*) echo \"\$seen\"; return 0;; esac
+        seen=\"\$seen \$mod\"
+        local depline
+        depline=\$(modinfo -F depends -k \"\$KVER\" \"\$mod\" 2>/dev/null || true)
+        if [ -n \"\$depline\" ]; then
+            local IFS=','
+            for d in \$depline; do
+                [ -z \"\$d\" ] && continue
+                seen=\$(resolve_deps \"\$d\" \"\$seen\")
+            done
+        fi
+        echo \"\$seen\"
+    }
+    ALL=''
+    for m in \$KMOD_LIST; do ALL=\$(resolve_deps \"\$m\" \"\$ALL\"); done
     mkdir -p /tmp/kmods
-    find /lib/modules/$KVER -name '*.ko*' \
-        | grep -E '$KWANT' \
-        | while read m; do
-            base=\$(basename \$m)
-            case \$base in
-                *.ko.xz) xz -d -c \$m > /tmp/kmods/\${base%.xz} ;;
-                *.ko)    cp \$m /tmp/kmods/\$base ;;
-            esac
-        done
+    for m in \$ALL; do
+        f=\$(modinfo -F filename -k \"\$KVER\" \"\$m\" 2>/dev/null || true)
+        [ -z \"\$f\" ] && continue
+        [ ! -f \"\$f\" ] && continue
+        base=\$(basename \"\$f\")
+        case \"\$base\" in
+            *.ko.xz) xz -d -c \"\$f\" > /tmp/kmods/\${base%.xz} ;;
+            *.ko)    cp \"\$f\" /tmp/kmods/\$base ;;
+        esac
+    done
     ls /tmp/kmods | wc -l
 "
 docker cp "$CONTAINER_NAME:/tmp/kmods/." "$KMODS_HOST/"

@@ -66,8 +66,12 @@ if [ -d /modules ]; then
     # vsock core then hv_sock transport.
     load_mod vsock
     load_mod hv_sock
-    # SCSI stack (for VHDX boot disk).
+    # SCSI stack (for VHDX boot disk). scsi_common provides helper symbols
+    # split out of scsi_mod in modern kernels — must load before scsi_mod.
+    # scsi_transport_fc is pulled in by hv_storvsc.
+    load_mod scsi_common
     load_mod scsi_mod
+    load_mod scsi_transport_fc
     load_mod hv_storvsc
     load_mod sd_mod
     # 9p stack (9p needs netfs since 6.x).
@@ -75,7 +79,9 @@ if [ -d /modules ]; then
     load_mod 9pnet
     load_mod 9pnet_fd
     load_mod 9p
-    # ext4 filesystem (for SCSI rootfs).
+    # ext4 filesystem (for SCSI rootfs). Needs crc16 + crc32c + libcrc32c
+    # + jbd2 + mbcache.
+    load_mod crc16
     load_mod crc32c_generic
     load_mod libcrc32c
     load_mod jbd2
