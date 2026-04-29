@@ -59,13 +59,10 @@ apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   ca-certificates curl
 
-# HTTPS mirrors
-rm -f /etc/apt/sources.list.d/debian.sources
-cat > /etc/apt/sources.list << 'APTEOF'
-deb https://mirrors.tuna.tsinghua.edu.cn/debian/ trixie main contrib non-free non-free-firmware
-deb https://mirrors.tuna.tsinghua.edu.cn/debian/ trixie-updates main contrib non-free non-free-firmware
-deb https://mirrors.tuna.tsinghua.edu.cn/debian-security trixie-security main contrib non-free non-free-firmware
-APTEOF
+# Install everything using upstream Debian mirrors (CI runners are overseas;
+# the China mirror would be slower from there). The China mirror config is
+# written into the image AFTER all installs (see "China mirrors" section
+# below) so end-users in China still get fast updates.
 
 apt-get update -qq
 
@@ -91,9 +88,30 @@ corepack enable
 groupadd -g 1000 tokimo
 useradd -m -u 1000 -g 1000 -s /bin/bash -d /home/tokimo tokimo
 
-npm config set --global registry https://registry.npmmirror.com
+# Use upstream npm registry for the install itself (fast on overseas CI).
 npm config set --global prefix /home/tokimo
 npm install -g pnpm docx pptxgenjs
+
+ln -sf ../../bin/python3 /usr/local/bin/python
+ln -sf ../../bin/lua5.4 /usr/local/bin/lua
+
+# pip uses upstream PyPI for the install too.
+mkdir -p /home/tokimo/python_packages
+pip3 install --break-system-packages --target=/home/tokimo/python_packages \
+  requests ipython rich \
+  pypdf pdfplumber reportlab pytesseract pdf2image \
+  pandas openpyxl "markitdown[pptx]" Pillow
+
+# ---------------------------------------------------------------------------
+# China mirrors (write AFTER installs, so the image ships with fast mirrors
+# for end-users in China without slowing down the CI build).
+# ---------------------------------------------------------------------------
+rm -f /etc/apt/sources.list.d/debian.sources
+cat > /etc/apt/sources.list << 'APTEOF'
+deb https://mirrors.tuna.tsinghua.edu.cn/debian/ trixie main contrib non-free non-free-firmware
+deb https://mirrors.tuna.tsinghua.edu.cn/debian/ trixie-updates main contrib non-free non-free-firmware
+deb https://mirrors.tuna.tsinghua.edu.cn/debian-security trixie-security main contrib non-free non-free-firmware
+APTEOF
 
 cat > /etc/pip.conf << 'PIPEOF'
 [global]
@@ -101,14 +119,7 @@ index-url = https://pypi.tuna.tsinghua.edu.cn/simple
 trusted-host = pypi.tuna.tsinghua.edu.cn
 PIPEOF
 
-ln -sf ../../bin/python3 /usr/local/bin/python
-ln -sf ../../bin/lua5.4 /usr/local/bin/lua
-
-mkdir -p /home/tokimo/python_packages
-pip3 install --break-system-packages --target=/home/tokimo/python_packages \
-  requests ipython rich \
-  pypdf pdfplumber reportlab pytesseract pdf2image \
-  pandas openpyxl "markitdown[pptx]" Pillow
+npm config set --global registry https://registry.npmmirror.com
 
 echo "TokimoOS" > /etc/hostname
 
