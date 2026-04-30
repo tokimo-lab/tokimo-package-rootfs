@@ -247,6 +247,11 @@ find /usr/share/zoneinfo -type d -empty -delete 2>/dev/null || true
 # The module-bundle step on the host does `docker cp /var/cache/tokimo-kmods/.` out.
 KVER_INNER=$(ls /lib/modules | head -1)
 KMOD_LIST='hv_vmbus hv_utils vsock hv_sock scsi_common scsi_mod scsi_transport_fc hv_storvsc sd_mod netfs 9pnet 9pnet_fd 9p crc16 crc32c_generic libcrc32c jbd2 mbcache ext4'
+# macOS VZ uses virtio-vsock (not Hyper-V). Add the virtio transport modules
+# for arm64 so the init binary can load them in the guest VM.
+if [ "$ARCH" = "arm64" ]; then
+    KMOD_LIST="$KMOD_LIST vmw_vsock_virtio_transport"
+fi
 resolve_deps() {
     local mod="$1" seen="$2"
     case " $seen " in *" $mod "*) echo "$seen"; return 0;; esac
