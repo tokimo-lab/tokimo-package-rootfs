@@ -7,9 +7,9 @@ on:
   pull_request:
     branches: [main]
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: write
+  actions: read
 
 # Supported sandbox hosts:
 #
@@ -28,12 +28,13 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-build-${{ github.ref }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
         arch: [amd64, arm64]
-    permissions:
-      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -138,19 +139,62 @@ jobs:
             tokimo-linux-rootfs-${{ steps.arch.outputs.suffix }}.vhdx.zip
             tokimo-linux-rootfs-${{ steps.arch.outputs.suffix }}.vhdx.zip.sha256
 
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+  release:
+    name: release (publish artifacts)
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push'
+    concurrency:
+      group: ${{ github.workflow }}-release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Download amd64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: tokimo-linux-x86_64
+          path: dist
+
+      - name: Download arm64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: tokimo-linux-arm64
+          path: dist
+
+      - name: Determine release tag/mode
+        id: meta
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+            prerelease=false
+            make_latest=true
+          else
+            tag="nightly"
+            prerelease=true
+            make_latest=false
+          fi
+          short_sha="${GITHUB_SHA::7}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
+          echo "make_latest=${make_latest}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${short_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Delete previous nightly release
+        if: steps.meta.outputs.tag == 'nightly'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete nightly --cleanup-tag --yes --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            tokimo-linux-rootfs-${{ steps.arch.outputs.suffix }}.tar.zst
-            tokimo-linux-rootfs-${{ steps.arch.outputs.suffix }}.tar.zst.sha256
-            tokimo-linux-kernel-${{ steps.arch.outputs.suffix }}.tar.zst
-            tokimo-linux-kernel-${{ steps.arch.outputs.suffix }}.tar.zst.sha256
-            tokimo-linux-rootfs-${{ steps.arch.outputs.suffix }}.vhdx.zip
-            tokimo-linux-rootfs-${{ steps.arch.outputs.suffix }}.vhdx.zip.sha256
+          tag_name: ${{ steps.meta.outputs.tag }}
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          make_latest: ${{ steps.meta.outputs.make_latest }}
+          name: ${{ steps.meta.outputs.tag == 'nightly' && format('Nightly ({0})', steps.meta.outputs.short_sha) || steps.meta.outputs.tag }}
           body: |
-            TokimoOS ${{ github.ref_name }}
+            TokimoOS ${{ steps.meta.outputs.tag == 'nightly' && format('Nightly ({0})', steps.meta.outputs.short_sha) || github.ref_name }}
 
             A Linux sandbox image (kernel + initrd + Debian rootfs) consumed by
             [tokimo-package-sandbox](https://github.com/tokimo-lab/tokimo-package-sandbox).
@@ -172,4 +216,14 @@ jobs:
             * **Linux x86_64** — `tokimo-linux-rootfs-x86_64.tar.zst`
             * **Windows x86_64** — `tokimo-linux-kernel-x86_64.tar.zst` + `tokimo-linux-rootfs-x86_64.vhdx.zip`
             * **macOS Apple Silicon (arm64)** — `tokimo-linux-kernel-arm64.tar.zst` + `tokimo-linux-rootfs-arm64.tar.zst`
-          make_latest: true
+          files: |
+            dist/tokimo-linux-rootfs-x86_64.tar.zst
+            dist/tokimo-linux-rootfs-x86_64.tar.zst.sha256
+            dist/tokimo-linux-kernel-x86_64.tar.zst
+            dist/tokimo-linux-kernel-x86_64.tar.zst.sha256
+            dist/tokimo-linux-rootfs-x86_64.vhdx.zip
+            dist/tokimo-linux-rootfs-x86_64.vhdx.zip.sha256
+            dist/tokimo-linux-rootfs-arm64.tar.zst
+            dist/tokimo-linux-rootfs-arm64.tar.zst.sha256
+            dist/tokimo-linux-kernel-arm64.tar.zst
+            dist/tokimo-linux-kernel-arm64.tar.zst.sha256

@@ -50,6 +50,7 @@ docker run -dit \
 
 echo "==> [3/6] Installing packages (kernel + busybox + runtimes)..."
 docker exec -i \
+  -e ARCH="$ARCH" \
   -e DEB_MULTIARCH="$DEB_MULTIARCH" \
   -e KERNEL_PKG="linux-image-${ARCH}" \
   "$CONTAINER_NAME" bash << 'BUILDER_SCRIPT'
